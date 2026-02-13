@@ -1,0 +1,40 @@
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 32px; /* 꼭 높이 줘야 화면에 나옴! */
+  background: #1379e6;
+  color: #fff;
+  padding: 0 8px;
+  z-index: 9999;
+}
+
+.dragRegion {
+  -webkit-app-region: drag;
+  flex: 1; /* 나머지 공간 꽉 채움 */
+}
+
+.appTitle {
+  user-select: none;
+  font-weight: bold;
+}
+
+.windowControls {
+  -webkit-app-region: no-drag; /* 버튼은 드래그 안되게! */
+  display: flex;
+}
+
+.controlBtn {
+  background-color: transparent;
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  transition: background-color 0.2s ease; /* 부드러운 전환 */
+}
+
+.controlBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1); /* 살짝 밝은 투명 배경 */
+  border-radius: 4px; /* 살짝 둥글게 하면 깔끔 */
+}
