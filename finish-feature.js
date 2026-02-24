@@ -30,8 +30,9 @@ function question(prompt) {
 async function finishFeature() {
   try {
     // 1. 현재 브랜치명 확인
-    const currentBranch = execSync('git rev-parse --abbr-ref HEAD', {
-      encoding: 'utf-8'
+    const currentBranch = execSync("git rev-parse --abbr-ref HEAD", {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
 
     if (!currentBranch.startsWith('issue/#')) {
