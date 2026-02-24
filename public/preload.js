@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 실행하기
   runApp: (appPath) => ipcRenderer.invoke('run-app', appPath),
 
+  // 레이아웃 저장/복원
+  saveLayout: (data) => ipcRenderer.invoke('save-layout', data),
+  loadLayout: () => ipcRenderer.invoke('load-layout'),
+
   // 창 컨트롤
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),

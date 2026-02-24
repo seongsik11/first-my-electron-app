@@ -4,6 +4,18 @@
   flex-direction: column;
   min-height: 100vh;
   text-align: center;
+  background-color: #030307; 
+
+ /* 2. 더 강력하고 부드러운 다중 레이어 효과 */
+ background-image: 
+   /* 깊은 보라색 안개 (좌측에서 넓게 퍼짐) */
+   radial-gradient(at 10% -20%, rgba(98, 0, 255, 0.6) 0%, transparent 70%),
+   /* 선명한 시안 블루 (우측에서 은은하게 스며듬) */
+   radial-gradient(at 90% 120%, rgba(0, 162, 255, 0.4) 0%, transparent 70%),
+   /* 중앙의 핑크빛 가스 성운 (부드러운 연결점) */
+   radial-gradient(at 50% 50%, rgba(255, 0, 150, 0.15) 0%, transparent 50%)
+   /* 노이즈 질감 (미세한 별가루 입자감을 위해 살짝 섞음) */
+   ;
 }
 
 .App-logo {

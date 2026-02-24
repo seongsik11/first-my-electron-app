@@ -7,8 +7,6 @@ function getAppIcon(app) {
   if (app.icon && typeof app.icon === "string" && app.icon.length > 0) {
     return app.icon;
   }
-  // Base64 아이콘이 없으면 기본 아이콘(직접 추가) 또는 심플한 placeholder 사용
-  // public 디렉토리에 default-app-icon.png 를 두었다면 아래 경로로 사용 가능
   return "/default-app-icon.png";
 }
 
@@ -55,4 +53,15 @@ export default function FolderIcon({ folder, openFolder, folderType }) {
       <span className={styles.label}>{folder.name}</span>
     </div>
   );
+}
+
+export function EmptySlot({ id }) {
+  const { setNodeRef, attributes, listeners, transform, transition } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    height: "100px",
+    width: "100%",
+  };
+  return <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={styles.emptySlot} />;
 }

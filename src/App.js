@@ -1,18 +1,15 @@
 
-import { RecoilRoot } from 'recoil';
 import './App.css';
-import TopBar from './components/topbar/TopBar';
-import Desktop from './components/applications/Desktop';
+import TopBar from './components/TopBar/main/TopBar';
+import Desktop from './components/Desktop/main/Desktop';
 
 function App() {
   return (
-    <RecoilRoot>
-        <div className="App">
-          <TopBar />
-          <Desktop />
-        </div>
-    </RecoilRoot>
+    <div className="App">
+      <TopBar />
+      <Desktop />
+    </div>
   );
 }
- 
+
 export default App;

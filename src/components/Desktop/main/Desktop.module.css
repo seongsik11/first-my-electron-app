@@ -1,15 +1,36 @@
 .desktopWrapper {
   position: relative;
   flex: 1;
-  min-height: 0;
   width: 100%;
+}
+
+/* 창문 역할: 현재 화면 크기만 보여주고 나머지는 숨김 */
+.desktopViewport {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 필름 역할: 모든 페이지를 가로로 길게 나열 */
+.pagesContainer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  /* transform과 transition은 인라인 스타일로 제어됨 */
+}
+
+/* 각 페이지 보자기: 화면 하나를 가득 채움 */
+.pageWrapper {
+  flex: 0 0 100%; /* 너비를 100%로 고정하고 줄어들지 않게 함 */
+  width: 100%;
+  height: 100%;
 }
 
 .desktop {
   position: relative;
   display: grid;
   grid-template-columns: repeat(auto-fill, 80px);
-  grid-auto-rows: 100px;
+  grid-auto-rows: 80px;
   gap: 16px;
   padding: 40px;
   touch-action: none;
@@ -18,6 +39,7 @@
 }
 
 .pageIndicator {
+  user-select: none;
   align-self: center;
   display: flex;
   flex-direction: row;
@@ -34,8 +56,10 @@
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.2);
   color: #fff;
-  font-size: 20px;
-  line-height: 1;
+  font-size: 25px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   cursor: pointer;
   padding: 0;
 }

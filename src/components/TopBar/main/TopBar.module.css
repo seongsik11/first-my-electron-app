@@ -3,10 +3,10 @@
   justify-content: space-between;
   align-items: center;
   height: 32px; /* 꼭 높이 줘야 화면에 나옴! */
-  background: #1379e6;
   color: #fff;
   padding: 0 8px;
   z-index: 9999;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
 }
 
 .dragRegion {
@@ -20,16 +20,21 @@
 }
 
 .windowControls {
-  -webkit-app-region: no-drag; /* 버튼은 드래그 안되게! */
+  -webkit-app-region: no-drag; /* 버튼은 드래그 안되게!(창 이동 X) */
   display: flex;
 }
 
 .controlBtn {
+  user-select: none;
+  margin:0;
   background-color: transparent;
   border: none;
   color: #fff;
   width: 32px;
   height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   cursor: pointer;
   transition: background-color 0.2s ease; /* 부드러운 전환 */
 }

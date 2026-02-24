@@ -38,24 +38,24 @@ export default function TopBar() {
           onClick={handleMinimize}
           aria-label="Minimize"
         >
-          ─
+          <span>─</span>
         </button>
         <button
           className={styles.controlBtn}
           onClick={handleMaximize}
           aria-label="Maximize"
+          disabled
         >
-          ☐
+          <span>☐</span>
         </button>
         <button
           className={styles.controlBtn}
           onClick={handleClose}
           aria-label="Close"
         >
-          ✕
+          <span>✕</span>
         </button>
       </div>
     </div>
   );
 }
-

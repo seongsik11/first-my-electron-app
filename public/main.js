@@ -6,6 +6,7 @@ const os = require('os');
 const log = require('electron-log/main');
 const squirrelStartup = require('electron-squirrel-startup');
 const plist = require('simple-plist');
+const Database = require('better-sqlite3');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const isDev = !app.isPackaged;
 
@@ -15,17 +16,49 @@ console.log('isDev:', isDev);
 log.initialize({ spyRendererConsole: true });
 
 let mainWindow;
+let db = null;
+
+// SQLite DB 초기화 — 레이아웃 저장 및 아이콘 캐시 테이블 생성
+function initDatabase() {
+    try {
+        const dbPath = path.join(app.getPath('userData'), 'appspace.db');
+        db = new Database(dbPath);
+        db.pragma('journal_mode = WAL'); // WAL 모드로 읽기/쓰기 성능 최적화
+
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS layout (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                pages_data TEXT NOT NULL,
+                current_page INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS icon_cache (
+                app_path TEXT PRIMARY KEY,
+                icon_data TEXT NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+        `);
+
+        log.info(`DB 초기화 완료: ${dbPath}`);
+    } catch (e) {
+        log.error('DB 초기화 실패:', e);
+        db = null; // DB 사용 불가 상태로 표시 — 이후 IPC 핸들러에서 null 체크
+    }
+}
+
 if (squirrelStartup) {
     log.info('Squirrel startup event detected');
 }
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1280,
-        height: 1024,
+        width: 1505,
+        height: 832,
         minWidth: 700,
         minHeight: 800,
         frame: false,
+        resizable: false,
+        maximizable: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
         },
@@ -45,6 +78,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+    initDatabase();
     createWindow();
 });
 
@@ -221,7 +255,93 @@ registerHandler('get-applications', async () => {
         });
     }
 
+    // 아이콘 캐시에 저장 — 이후 레이아웃 복원 시 아이콘을 빠르게 불러오기 위함
+    if (db) {
+        try {
+            const upsertIcon = db.prepare(`
+                INSERT OR REPLACE INTO icon_cache (app_path, icon_data, updated_at)
+                VALUES (?, ?, datetime('now', 'localtime'))
+            `);
+            for (const a of apps) {
+                if (a.icon) {
+                    upsertIcon.run(a.path, a.icon);
+                }
+            }
+        } catch (e) {
+            log.warn('아이콘 캐시 저장 실패:', e);
+        }
+    }
+
     return apps;
+});
+
+// 레이아웃 저장 — icon 필드를 제거한 가벼운 JSON만 DB에 저장
+registerHandler('save-layout', async (event, data) => {
+    if (!db) return;
+
+    const { pages, currentPage } = data;
+
+    // icon 필드를 제거하여 저장 용량 최소화
+    const stripped = pages.map(page =>
+        page.map(item => {
+            if (item.type === 'empty') return item;
+            if (item.type === 'folder') {
+                return { ...item, items: item.items.map(({ icon, ...rest }) => rest) };
+            }
+            const { icon, ...rest } = item;
+            return rest;
+        })
+    );
+
+    try {
+        const stmt = db.prepare(`
+            INSERT OR REPLACE INTO layout (id, pages_data, current_page, updated_at)
+            VALUES (1, ?, ?, datetime('now', 'localtime'))
+        `);
+        stmt.run(JSON.stringify(stripped), currentPage);
+    } catch (e) {
+        log.warn('레이아웃 저장 실패:', e);
+    }
+});
+
+// 레이아웃 로드 — DB에서 pages_data를 읽고, icon_cache에서 아이콘을 복원
+registerHandler('load-layout', async () => {
+    if (!db) return null;
+
+    try {
+        const row = db.prepare('SELECT pages_data, current_page FROM layout WHERE id = 1').get();
+        if (!row) return null;
+
+        const pages = JSON.parse(row.pages_data);
+
+        // icon_cache에서 각 앱의 아이콘 데이터를 복원
+        const getIcon = db.prepare('SELECT icon_data FROM icon_cache WHERE app_path = ?');
+
+        const restored = pages.map(page =>
+            page.map(item => {
+                if (item.type === 'empty') return item;
+                if (item.type === 'app') {
+                    const cached = getIcon.get(item.path);
+                    return { ...item, icon: cached ? cached.icon_data : null };
+                }
+                if (item.type === 'folder') {
+                    return {
+                        ...item,
+                        items: item.items.map(app => {
+                            const cached = getIcon.get(app.path);
+                            return { ...app, icon: cached ? cached.icon_data : null };
+                        }),
+                    };
+                }
+                return item;
+            })
+        );
+
+        return { pages: restored, currentPage: row.current_page };
+    } catch (e) {
+        log.warn('레이아웃 로드 실패:', e);
+        return null;
+    }
 });
 
 registerHandler('run-app', async (event, appPath) => {
@@ -233,10 +353,14 @@ registerHandler('run-app', async (event, appPath) => {
     }
 });
 
-// 앱 종료 전에 모든 핸들러 정리
+// 앱 종료 전에 모든 핸들러 정리 및 DB 연결 닫기
 app.on('before-quit', () => {
     registeredHandlers.forEach(channel => {
         ipcMain.removeHandler(channel);
     });
+    if (db) {
+        db.close();
+        log.info('DB 연결이 닫혔습니다.');
+    }
     log.info('모든 IPC 핸들러가 정리되었습니다.');
 });
