@@ -578,6 +578,221 @@ Git Hook 자동 실행: Notion 업데이트
 
 ---
 
+### Claude의 작업 수행 절차 (Feature Development Workflow)
+
+**당신이 작업/기능을 요청하면 내가 수행해야 할 정확한 순서:**
+
+#### **Phase 1️⃣: 작업 초기화 (Issue + 브랜치 자동 생성)**
+
+```
+당신: "이 기능 구현해줄래" / "이 버그 고쳐줄래"
+  ↓
+내 조치:
+  1️⃣ node start-feature.js "기능 제목" "상세 설명"
+
+     결과:
+     ✅ GitHub Issue #N 자동 생성
+     ✅ issue/#N 브랜치 자동 생성 및 checkout
+```
+
+**절대 규칙:** 작업을 시작하기 전에 항상 Issue와 브랜치가 먼저 생성되어야 한다.
+
+---
+
+#### **Phase 2️⃣: 작업 수행 준비**
+
+```
+2️⃣ 변경 범위 사전 명시
+   "이 작업에서는:
+    - 이 파일들을 수정합니다: [A, B, C]
+    - 이것은 절대 바꾸지 않습니다: [UI, 성능, 기존 동작]
+    - 영향 범위: [이 부분에만]"
+
+3️⃣ 기존 코드 읽기 (필수)
+   - 수정할 파일들을 먼저 Read 도구로 읽기
+   - 기존 패턴, 네이밍 규칙, 데이터 구조 파악
+   - 추측 금지 (섹션 8 참조)
+
+4️⃣ 불명확하면 질문
+   - 요구사항 애매? → AskUserQuestion 사용
+   - 구현 방식이 여러 개? → 당신에게 선택권 제시
+
+5️⃣ 복잡하면 Plan Mode
+   - 3개 이상 파일 수정? → EnterPlanMode 진입
+   - 아키텍처 결정 필요? → 계획 제시 후 승인받기
+```
+
+---
+
+#### **Phase 3️⃣: 실제 개발**
+
+```
+6️⃣ 코드 수정 실행
+   - Edit, Write, Bash 등 도구 사용
+   - CLAUDE.md 규칙 준수 (1-10번 섹션)
+   - 절대 무단 변경 금지 (변경 범위 내에만)
+```
+
+---
+
+#### **Phase 4️⃣: 작업 완료 및 리포트**
+
+```
+7️⃣ 변경 리포트 작성 (필수) — 섹션 3 형식
+   ✅ 변경 파일 목록
+   ✅ 핵심 diff 요약
+   ✅ 리스크/부작용
+   ✅ 롤백 방법
+   ✅ 검증 결과
+```
+
+---
+
+#### **Phase 5️⃣: Git Push (당신의 명령에 따라 결정)**
+
+```
+이제 당신이 지시:
+
+당신: "현 브랜치에 push 해줘"
+  ↓
+나: node finish-feature.js 실행
+     (커밋 + 푸시 + PR 생성)
+
+당신: "main에 push 해줘"
+  ↓
+나: PR merge: issue/#N → main
+     ↓
+     🔔 Git Hook 자동 감지 (issue/#N → main merge만)
+     ↓
+     save-to-notion.js 자동 실행
+     ↓
+     ✅ Notion 자동 업데이트 (이 시점에만!)
+
+당신: "develop에 push 해줘"
+  ↓
+나: issue/#N → main (이미 main에 merge됨)
+     ↓
+   main → develop (PR merge)
+     → Notion 정리 안 함 (이미 위에서 했음)
+
+당신: "release에 push 해줘"
+  ↓
+나: issue/#N → main (이미 main에 merge됨)
+     ↓
+   main → develop (PR merge)
+     ↓
+   develop → release (PR merge)
+     → Notion 정리 안 함 (이미 issue#N→main에서 했음)
+
+당신: "main에서 release로 push 해줘"
+  ↓
+나: main → release (PR merge, issue 브랜치 없음)
+     → Notion 정리 안 함 (issue 완료가 아니라 버그패치/긴급수정)
+```
+
+**핵심 규칙:**
+- **딱 한 번만**: issue/#N → main merge 완료 시점에서 Notion 업데이트
+- 같은 이슈에 대한 develop/release로의 merge는 이미 main에 통합된 것이므로 Notion 정리 안 함
+- main → release (예외 케이스)는 이슈가 아닌 긴급 패치이므로 Notion 정리 안 함
+
+---
+
+#### **전체 흐름 (한눈에 보기)**
+
+```
+당신: "기능 구현해줄래"
+  ↓
+[Phase 1] node start-feature.js 실행
+           → Issue #N 생성, issue/#N 브랜치 생성
+  ↓
+[Phase 2] 범위 명시 + 코드 읽기 + 필요시 질문/Plan
+  ↓
+[Phase 3] 코드 수정
+  ↓
+[Phase 4] 변경 리포트 작성
+  ↓
+당신: "현 브랜치에 push 해줘" (또는 main/develop/release)
+  ↓
+[Phase 5] node finish-feature.js 또는 PR merge 실행
+  ↓
+작업 완료
+```
+
+---
+
+### Push 명령어 (당신의 지시에 따른 자동화)
+
+**규칙: PR 병합을 통한 순차적 통합 (직접 push는 issue 브랜치만)**
+
+#### 1. 현 브랜치 직접 Push
+```bash
+당신: "현 브랜치에 push 해줘"
+  ↓
+나: git add . → git commit → git push origin issue/#123
+```
+**유일한 직접 push 케이스입니다. (issue 브랜치에서만)**
+
+---
+
+#### 2. main으로 PR Merge
+```bash
+당신: "main에 push 해줘"
+  ↓
+나: gh pr create --base main --head issue/#123
+   gh pr merge [PR번호] --merge
+```
+
+---
+
+#### 3. develop으로 순차 PR Merge
+```bash
+당신: "develop에 push 해줘"
+  ↓
+나: issue/#123 → main (PR merge)
+   ↓ (자동)
+   main → develop (PR merge)
+```
+
+---
+
+#### 4. release로 순차 PR Merge
+```bash
+당신: "release에 push 해줘"
+  ↓
+나: issue/#123 → main (PR merge)
+   ↓ (자동)
+   main → develop (PR merge)
+   ↓ (자동)
+   develop → release (PR merge)
+```
+
+---
+
+#### 5. 예외: main에서 release로 직접 Merge (develop 스킵)
+```bash
+당신: "main에서 release로 push 해줘"
+  ↓
+나: main → release (PR merge)
+```
+**사용 사례:**
+- 서명 테스트
+- 긴급 버그 패치
+- 긴급 수정 필요 시
+
+---
+
+### Push 명령어 요약표
+
+| 당신의 명령 | 실행 흐름 | 직접 Push |
+|----------|---------|---------|
+| "현 브랜치에 push 해줘" | issue/#123 push | ✅ |
+| "main에 push 해줘" | issue/#123 → main (PR) | ❌ |
+| "develop에 push 해줘" | issue/#123 → main → develop (PR) | ❌ |
+| "release에 push 해줘" | issue/#123 → main → develop → release (PR) | ❌ |
+| "main에서 release로 push 해줘" | main → release (PR) | ❌ |
+
+---
+
 ## 12. 작업 중단 시 프로토콜
 
 Claude API의 Rate Limit 또는 기타 이유로 작업을 중단해야 할 때:
