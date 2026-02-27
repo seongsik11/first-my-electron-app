@@ -1,5 +1,4 @@
-import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { useSortable } from "@dnd-kit/sortable";
 import styles from "./FolderIcon.module.css";
 
 // 앱 아이콘이 없는 경우를 위해 간단한 플레이스홀더
@@ -10,13 +9,12 @@ function getAppIcon(app) {
   return "/default-app-icon.png";
 }
 
-// 드롭 직후 layout 슬라이드 애니메이션 비활성화
-// — @dnd-kit 내부의 useDerivedTransform이 "이전위치→새위치" 200ms 슬라이드를 만드는데,
-//   wasDragging && !isSorting (드롭 직후) 일 때 false 반환 → useDerivedTransform 자체를 차단
-function animateLayoutChanges(args) {
-  const { isSorting, wasDragging } = args;
-  if (wasDragging && !isSorting) return false;
-  return defaultAnimateLayoutChanges(args);
+// DragOverlay 사용 시 FLIP 애니메이션 불필요
+// @dnd-kit/sortable의 useDerivedTransform이 생성하는 레이아웃 변경 애니메이션은
+// 드래그 후 아이템이 반대 방향으로 찰나 이동한 후 정착하는 버그를 야기함
+// 원본 아이콘의 이동은 DragOverlay가 담당하므로 FLIP 애니메이션 완전 비활성화
+function animateLayoutChanges() {
+  return false;
 }
 
 /** 드래그 오버레이용 */
@@ -32,12 +30,15 @@ export function AppIconOverlay({ app }) {
 }
 
 export default function AppIcon({ app, openApp }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
     useSortable({ id: app.id, animateLayoutChanges });
 
+  // x/y translate만 사용 → scaleX/scaleY 왜곡 방지
+  // transition 제거 → 드롭 후 슬라이드 애니메이션 차단
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+    transform: transform
+      ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
+      : undefined,
     opacity: isDragging ? 0.5 : 1,
     cursor: "grab",
   };
@@ -63,10 +64,11 @@ export default function AppIcon({ app, openApp }) {
 export function EmptySlot({ id }) {
   // listeners 미적용 — 빈 슬롯은 드롭 대상으로만 사용 (직접 드래그 불가)
   // → 빈 슬롯 위에서 클릭 시 DnD가 활성화되지 않아 스와이프 정상 동작
-  const { setNodeRef, attributes, transform, transition } = useSortable({ id, animateLayoutChanges });
+  const { setNodeRef, attributes, transform } = useSortable({ id, animateLayoutChanges });
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+    transform: transform
+      ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
+      : undefined,
     height: "100px",
     width: "100%",
   };
