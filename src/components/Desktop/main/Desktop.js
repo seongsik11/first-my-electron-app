@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors, defaultDropAnimationSideEffects } from "@dnd-kit/core";
 import { SortableContext, arrayMove } from "@dnd-kit/sortable";
 import AppIcon, { EmptySlot, AppIconOverlay } from "../../FolderIcon/main/FolderIcon";
 import PageDropZone from "../../PageDropZone/main/PageDropZone";
@@ -80,10 +80,22 @@ export default function Desktop() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5, // 5픽셀 이동 후 드래그 시작 (즉각 반응)
+        delay: 100,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
+        tolerance: 8,  // 8px 이내 움직임 허용 (손가락/마우스 떨림 방지)
       },
     })
   );
+
+  // 드롭 애니메이션 커스텀 -- 드롭 중 원본 아이콘 숨김 유지 (opacity 충돌 방지)
+  const dropAnimationConfig = {
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: {
+        active: {
+          opacity: '0',
+        },
+      },
+    }),
+  };
 
   const wrapperRef = useRef(null);
   const mouseSwipeStartRef = useRef(null);
@@ -241,7 +253,6 @@ export default function Desktop() {
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
   };
-
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
@@ -404,9 +415,14 @@ export default function Desktop() {
             </>
           )}
 
-          <DragOverlay dropAnimation={null}>
+          <DragOverlay dropAnimation={dropAnimationConfig}>
             {activeItem && activeItem.type !== 'empty' ? (
-              <AppIconOverlay app={activeItem} />
+              <div style={{
+                transform: 'scale(1.15)',
+                filter: 'drop-shadow(0 8px 20px rgba(0, 0, 0, 0.5))',
+              }}>
+                <AppIconOverlay app={activeItem} />
+              </div>
             ) : null}
           </DragOverlay>
         </DndContext>
