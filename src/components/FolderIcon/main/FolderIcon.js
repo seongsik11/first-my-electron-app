@@ -35,8 +35,7 @@ export default function AppIcon({ app, openApp }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: app.id, animateLayoutChanges });
 
-  // Zustand selector 패턴으로 editMode, activeId 읽기
-  const editMode = useDesktopStore((state) => state.editMode);
+  // activeId: smooth reorder transition 조건부 적용용
   const activeId = useDesktopStore((state) => state.activeId);
 
   const style = {
@@ -51,9 +50,6 @@ export default function AppIcon({ app, openApp }) {
     cursor: "grab",
   };
 
-  // editMode 중이고, 자신이 드래그 중인 아이콘이 아닐 때 jiggle 적용
-  const isJiggling = editMode && !isDragging;
-
   return (
     <div
       ref={setNodeRef}
@@ -64,8 +60,7 @@ export default function AppIcon({ app, openApp }) {
       onDoubleClick={openApp}
       className={styles.appIcon}
     >
-      {/* jiggle을 iconWrapper에 적용 -- outer div의 translate3d와 충돌 없음, label 흔들림 없음 */}
-      <div className={`${styles.iconWrapper} ${isJiggling ? styles.jiggle : ''}`}>
+      <div className={styles.iconWrapper}>
         <img src={getAppIcon(app)} alt={app.name} />
       </div>
       <span className={styles.label}>{app.name}</span>

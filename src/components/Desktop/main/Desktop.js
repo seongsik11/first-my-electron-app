@@ -80,7 +80,7 @@ export default function Desktop() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        delay: 400,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
+        delay: 100,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
         tolerance: 8,  // 8px 이내 움직임 허용 (손가락/마우스 떨림 방지)
       },
     })
@@ -105,8 +105,6 @@ export default function Desktop() {
   const isInitialLoad = useRef(true);
   // 드래그 중 여부 (마우스 스와이프와 충돌 방지용)
   const activeIdRef = useRef(null);
-  // 드래그 종료 직후 click 이벤트로 editMode가 해제되는 것을 방지
-  const justDraggedRef = useRef(false);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -117,8 +115,6 @@ export default function Desktop() {
   const setCurrentPage = useDesktopStore((state) => state.setCurrentPage);
   const setTouchStartX = useDesktopStore((state) => state.setTouchStartX);
   const setActiveId = useDesktopStore((state) => state.setActiveId);
-  const editMode = useDesktopStore((state) => state.editMode);
-  const setEditMode = useDesktopStore((state) => state.setEditMode);
 
   currentPageRef.current = currentPage;
   pagesLengthRef.current = pages.length;
@@ -256,16 +252,11 @@ export default function Desktop() {
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
-    // editMode 진입 -- 드래그가 실제로 시작된 시점에서만 (타이밍 경합 제거)
-    setEditMode(true);
   };
-
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
     setActiveId(null);
-    // 드래그 직후 click 이벤트로 editMode가 해제되는 것을 방지
-    justDraggedRef.current = true;
     if (!over) return;
 
     const activeItemId = active.id;
@@ -372,19 +363,6 @@ export default function Desktop() {
             !e.target.closest("[data-sortable='true']")
           ) {
             mouseSwipeStartRef.current = e.clientX;
-          }
-        }}
-        onClick={(e) => {
-          // 드래그 직후 발생하는 click 이벤트 무시 (editMode 해제 방지)
-          if (justDraggedRef.current) {
-            justDraggedRef.current = false;
-            return;
-          }
-          // 아이콘(data-sortable) 위 클릭은 무시 -- 앱 실행 등 기존 동작 유지
-          if (e.target.closest("[data-sortable='true']")) return;
-          // 빈 영역 클릭 시 editMode 해제
-          if (editMode) {
-            setEditMode(false);
           }
         }}
       >
