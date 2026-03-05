@@ -37,3 +37,15 @@
   text-align: center;
   word-break: break-word;
 }
+
+/* Jiggle 효과 -- editMode 중 다른 아이콘들의 iconWrapper가 살짝 흔들림 */
+@keyframes jiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-1.5deg); }
+  75% { transform: rotate(1.5deg); }
+}
+
+.jiggle {
+  animation: jiggle 0.3s ease-in-out infinite;
+  will-change: transform;
+}

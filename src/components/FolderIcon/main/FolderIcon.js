@@ -1,5 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import styles from "./FolderIcon.module.css";
+import useDesktopStore from "../../Desktop/store/state";
 
 // 앱 아이콘이 없는 경우를 위해 간단한 플레이스홀더
 function getAppIcon(app) {
@@ -30,18 +31,28 @@ export function AppIconOverlay({ app }) {
 }
 
 export default function AppIcon({ app, openApp }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
+  // transition을 destructuring에 추가 -- smooth reorder를 위해 사용
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: app.id, animateLayoutChanges });
 
-  // x/y translate만 사용 → scaleX/scaleY 왜곡 방지
-  // transition 제거 → 드롭 후 슬라이드 애니메이션 차단
+  // Zustand selector 패턴으로 editMode, activeId 읽기
+  const editMode = useDesktopStore((state) => state.editMode);
+  const activeId = useDesktopStore((state) => state.activeId);
+
   const style = {
     transform: transform
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
-    opacity: isDragging ? 0.5 : 1,
+    // useSortable이 반환한 transition을 activeId 조건부로 적용
+    // activeId=null(드롭 시) → transition=undefined로 동시 적용 → FLIP 버그 불가 (React 18 batching)
+    transition: activeId ? transition : undefined,
+    // 드래그 중인 원본 아이콘은 완전 숨김 (DragOverlay가 대체)
+    opacity: isDragging ? 0 : 1,
     cursor: "grab",
   };
+
+  // editMode 중이고, 자신이 드래그 중인 아이콘이 아닐 때 jiggle 적용
+  const isJiggling = editMode && !isDragging;
 
   return (
     <div
@@ -53,7 +64,8 @@ export default function AppIcon({ app, openApp }) {
       onDoubleClick={openApp}
       className={styles.appIcon}
     >
-      <div className={styles.iconWrapper}>
+      {/* jiggle을 iconWrapper에 적용 -- outer div의 translate3d와 충돌 없음, label 흔들림 없음 */}
+      <div className={`${styles.iconWrapper} ${isJiggling ? styles.jiggle : ''}`}>
         <img src={getAppIcon(app)} alt={app.name} />
       </div>
       <span className={styles.label}>{app.name}</span>
@@ -64,11 +76,17 @@ export default function AppIcon({ app, openApp }) {
 export function EmptySlot({ id }) {
   // listeners 미적용 — 빈 슬롯은 드롭 대상으로만 사용 (직접 드래그 불가)
   // → 빈 슬롯 위에서 클릭 시 DnD가 활성화되지 않아 스와이프 정상 동작
-  const { setNodeRef, attributes, transform } = useSortable({ id, animateLayoutChanges });
+  // transition을 destructuring에 추가 -- AppIcon과 동일한 smooth reorder 패턴 적용
+  const { setNodeRef, attributes, transform, transition } = useSortable({ id, animateLayoutChanges });
+  // EmptySlot도 smooth reorder를 위해 activeId 읽기
+  const activeId = useDesktopStore((state) => state.activeId);
+
   const style = {
     transform: transform
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
+    // AppIcon과 동일한 조건부 transition -- activeId=null 시 undefined
+    transition: activeId ? transition : undefined,
     height: "100px",
     width: "100%",
   };

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors, defaultDropAnimationSideEffects } from "@dnd-kit/core";
 import { SortableContext, arrayMove } from "@dnd-kit/sortable";
 import AppIcon, { EmptySlot, AppIconOverlay } from "../../FolderIcon/main/FolderIcon";
 import PageDropZone from "../../PageDropZone/main/PageDropZone";
@@ -80,10 +80,22 @@ export default function Desktop() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5, // 5픽셀 이동 후 드래그 시작 (즉각 반응)
+        delay: 400,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
+        tolerance: 8,  // 8px 이내 움직임 허용 (손가락/마우스 떨림 방지)
       },
     })
   );
+
+  // 드롭 애니메이션 커스텀 -- 드롭 중 원본 아이콘 숨김 유지 (opacity 충돌 방지)
+  const dropAnimationConfig = {
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: {
+        active: {
+          opacity: '0',
+        },
+      },
+    }),
+  };
 
   const wrapperRef = useRef(null);
   const mouseSwipeStartRef = useRef(null);
@@ -93,6 +105,8 @@ export default function Desktop() {
   const isInitialLoad = useRef(true);
   // 드래그 중 여부 (마우스 스와이프와 충돌 방지용)
   const activeIdRef = useRef(null);
+  // 드래그 종료 직후 click 이벤트로 editMode가 해제되는 것을 방지
+  const justDraggedRef = useRef(false);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -103,6 +117,8 @@ export default function Desktop() {
   const setCurrentPage = useDesktopStore((state) => state.setCurrentPage);
   const setTouchStartX = useDesktopStore((state) => state.setTouchStartX);
   const setActiveId = useDesktopStore((state) => state.setActiveId);
+  const editMode = useDesktopStore((state) => state.editMode);
+  const setEditMode = useDesktopStore((state) => state.setEditMode);
 
   currentPageRef.current = currentPage;
   pagesLengthRef.current = pages.length;
@@ -240,12 +256,16 @@ export default function Desktop() {
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
+    // editMode 진입 -- 드래그가 실제로 시작된 시점에서만 (타이밍 경합 제거)
+    setEditMode(true);
   };
 
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
     setActiveId(null);
+    // 드래그 직후 click 이벤트로 editMode가 해제되는 것을 방지
+    justDraggedRef.current = true;
     if (!over) return;
 
     const activeItemId = active.id;
@@ -354,6 +374,19 @@ export default function Desktop() {
             mouseSwipeStartRef.current = e.clientX;
           }
         }}
+        onClick={(e) => {
+          // 드래그 직후 발생하는 click 이벤트 무시 (editMode 해제 방지)
+          if (justDraggedRef.current) {
+            justDraggedRef.current = false;
+            return;
+          }
+          // 아이콘(data-sortable) 위 클릭은 무시 -- 앱 실행 등 기존 동작 유지
+          if (e.target.closest("[data-sortable='true']")) return;
+          // 빈 영역 클릭 시 editMode 해제
+          if (editMode) {
+            setEditMode(false);
+          }
+        }}
       >
         <DndContext
           sensors={sensors}
@@ -404,9 +437,14 @@ export default function Desktop() {
             </>
           )}
 
-          <DragOverlay dropAnimation={null}>
+          <DragOverlay dropAnimation={dropAnimationConfig}>
             {activeItem && activeItem.type !== 'empty' ? (
-              <AppIconOverlay app={activeItem} />
+              <div style={{
+                transform: 'scale(1.15)',
+                filter: 'drop-shadow(0 8px 20px rgba(0, 0, 0, 0.5))',
+              }}>
+                <AppIconOverlay app={activeItem} />
+              </div>
             ) : null}
           </DragOverlay>
         </DndContext>
