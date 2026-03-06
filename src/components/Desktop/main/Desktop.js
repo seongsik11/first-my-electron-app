@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors, defaultDropAnimationSideEffects } from "@dnd-kit/core";
 import { SortableContext, arrayMove } from "@dnd-kit/sortable";
-import AppIcon, { EmptySlot, AppIconOverlay } from "../../FolderIcon/main/FolderIcon";
+import AppIcon, { EmptySlot, AppIconOverlay, FolderIcon, FolderIconOverlay } from "../../FolderIcon/main/FolderIcon";
 import PageDropZone from "../../PageDropZone/main/PageDropZone";
+import FolderModal from "../../FolderModal/main/FolderModal";
 import styles from "./Desktop.module.css";
 import useDesktopStore from "../store/state";
 
@@ -80,7 +81,7 @@ export default function Desktop() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        delay: 100,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
+        delay: 80,    // 400ms long press (더블클릭 ~300ms보다 충분히 길어 충돌 없음)
         tolerance: 8,  // 8px 이내 움직임 허용 (손가락/마우스 떨림 방지)
       },
     })
@@ -105,6 +106,10 @@ export default function Desktop() {
   const isInitialLoad = useRef(true);
   // 드래그 중 여부 (마우스 스와이프와 충돌 방지용)
   const activeIdRef = useRef(null);
+  // 폴더 생성 hover 타이머 (500ms)
+  const folderHoverTimerRef = useRef(null);
+  // 현재 hover 중인 타겟 id — 타이머 재시작 방지용
+  const folderHoverTargetRef = useRef(null);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -115,6 +120,11 @@ export default function Desktop() {
   const setCurrentPage = useDesktopStore((state) => state.setCurrentPage);
   const setTouchStartX = useDesktopStore((state) => state.setTouchStartX);
   const setActiveId = useDesktopStore((state) => state.setActiveId);
+  const setOpenedFolderId = useDesktopStore((state) => state.setOpenedFolderId);
+  const setHoverTargetId = useDesktopStore((state) => state.setHoverTargetId);
+  const openedFolderId = useDesktopStore((state) => state.openedFolderId);
+  const draggingFromFolderApp = useDesktopStore((state) => state.draggingFromFolderApp);
+  const setDraggingFromFolderApp = useDesktopStore((state) => state.setDraggingFromFolderApp);
 
   currentPageRef.current = currentPage;
   pagesLengthRef.current = pages.length;
@@ -250,12 +260,186 @@ export default function Desktop() {
     }
   };
 
+  // 폴더 hover 타이머 정리 — 단일 지점 (handleDragEnd 최상단에서만 호출)
+  const clearFolderHover = () => {
+    if (folderHoverTimerRef.current) {
+      clearTimeout(folderHoverTimerRef.current);
+      folderHoverTimerRef.current = null;
+    }
+    folderHoverTargetRef.current = null;
+    setHoverTargetId(null);
+  };
+
+  // onDragOver: 앱→앱 500ms hover 시 폴더 자동 생성 (One UI 패턴)
+  const handleDragOver = (event) => {
+    const { active, over } = event;
+    if (!over) {
+      clearFolderHover();
+      return;
+    }
+
+    const overId = String(over.id);
+
+    // 엣지 zone이면 hover 취소
+    if (overId === "page-left" || overId === "page-right") {
+      clearFolderHover();
+      return;
+    }
+
+    // over 아이템 조회 (최신 pages 사용)
+    const currentPages = useDesktopStore.getState().pages;
+    const overPos = findItemPosition(currentPages, overId);
+
+    // over가 빈 슬롯이면 hover 취소
+    if (!overPos || overPos.item.type === "empty") {
+      clearFolderHover();
+      return;
+    }
+
+    // over가 folder 타입인 경우 — 앱→앱과 동일한 500ms 타이머 패턴
+    // 단순 통과와 "폴더에 추가하려는 의도"를 구분하기 위해
+    if (overPos.item.type === "folder") {
+      if (folderHoverTargetRef.current === overId) return;
+      clearFolderHover();
+      folderHoverTargetRef.current = overId;
+      setHoverTargetId(overPos.item.id);
+      folderHoverTimerRef.current = setTimeout(() => {
+        folderHoverTimerRef.current = null;
+        // folderHoverTargetRef.current 유지 — DROP 시 completedHoverTarget 판별용
+        // hoverTargetId 시각 피드백 유지
+      }, 500);
+      return;
+    }
+
+    // active와 over가 동일하면 무시
+    if (String(active.id) === overId) {
+      clearFolderHover();
+      return;
+    }
+
+    // 이미 같은 타겟으로 타이머 진행 중이면 재시작 안 함 (타이머 안정성)
+    if (folderHoverTargetRef.current === overId) return;
+
+    // 새 타겟 — 이전 타이머 정리 후 새 타이머 시작
+    clearFolderHover();
+    folderHoverTargetRef.current = overId;
+    setHoverTargetId(overPos.item.id);
+
+    folderHoverTimerRef.current = setTimeout(() => {
+      // 타이머 완료 마킹 — ref는 유지(의도 완료 상태), 타이머 ref만 null
+      // 실제 폴더 생성은 handleDragEnd에서 DROP 시에만 수행
+      folderHoverTimerRef.current = null;
+      // folderHoverTargetRef.current 유지 — handleDragEnd에서 completedHoverTarget 판별에 사용
+      // hoverTargetId 시각 피드백 유지 — "여기 드롭하면 폴더 생성" 표시
+    }, 500);
+  };
+
   const handleDragStart = (event) => {
-    setActiveId(event.active.id);
+    const { active } = event;
+    setActiveId(active.id);
+
+    // 폴더 모달 앱 드래그 감지 — id 패턴: folder-app-{appId}
+    // 모달은 닫지 않음 — onDragMove에서 포인터가 모달 영역 바깥으로 나갈 때 닫힘
+    if (String(active.id).startsWith("folder-app-")) {
+      const app = active.data.current?.app;
+      if (app && openedFolderId) {
+        setDraggingFromFolderApp({ app, folderId: openedFolderId });
+      }
+    }
+  };
+
+  // onDragMove: 폴더 모달 앱 드래그 중 포인터가 모달 영역 바깥으로 나가면 모달 닫기
+  const handleDragMove = (event) => {
+    // draggingFromFolderApp 상태이고 모달이 아직 열려있는 경우에만 처리
+    const currentOpenedFolderId = useDesktopStore.getState().openedFolderId;
+    const currentDraggingFromFolderApp = useDesktopStore.getState().draggingFromFolderApp;
+    if (!currentDraggingFromFolderApp || !currentOpenedFolderId) return;
+
+    // activatorEvent(최초 포인터 위치) + delta(이동량)으로 현재 포인터 좌표 계산
+    const { activatorEvent, delta } = event;
+    const pointerX = activatorEvent.clientX + delta.x;
+    const pointerY = activatorEvent.clientY + delta.y;
+
+    // data-folder-modal 속성으로 모달 요소 찾기
+    const modalEl = document.querySelector("[data-folder-modal]");
+    if (!modalEl) return;
+
+    const rect = modalEl.getBoundingClientRect();
+    // 포인터가 모달 영역 바깥이면 모달 닫기
+    if (
+      pointerX < rect.left ||
+      pointerX > rect.right ||
+      pointerY < rect.top ||
+      pointerY > rect.bottom
+    ) {
+      setOpenedFolderId(null);
+    }
   };
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
+
+    // 폴더 모달에서 DnD로 앱 꺼내기 처리
+    if (draggingFromFolderApp) {
+      setDraggingFromFolderApp(null);
+      setActiveId(null);
+      clearFolderHover();
+
+      if (over) {
+        const overId = String(over.id);
+        const { app, folderId } = draggingFromFolderApp;
+        const latestPages = useDesktopStore.getState().pages;
+        const nextPages = latestPages.map((p) => [...p]);
+
+        // 폴더에서 앱 제거
+        for (let pi = 0; pi < nextPages.length; pi++) {
+          const folderIdx = nextPages[pi].findIndex(
+            (it) => it.id === folderId && it.type === "folder"
+          );
+          if (folderIdx === -1) continue;
+
+          const folder = nextPages[pi][folderIdx];
+          const newItems = folder.items.filter((it) => it.id !== app.id);
+
+          if (newItems.length === 0) {
+            // 앱 0개 — 빈 슬롯으로 교체
+            nextPages[pi][folderIdx] = {
+              id: `empty-${pi}-${folderIdx}-${Date.now()}`,
+              type: "empty",
+            };
+          } else if (newItems.length === 1) {
+            // 앱 1개 — 폴더 해제, 남은 앱을 폴더 자리에
+            nextPages[pi][folderIdx] = newItems[0];
+          } else {
+            nextPages[pi][folderIdx] = { ...folder, items: newItems };
+          }
+          break;
+        }
+
+        // 드롭 위치에 앱 배치
+        const dropPos = findItemPosition(nextPages, overId);
+        if (dropPos && dropPos.item.type === "empty") {
+          nextPages[dropPos.pageIndex][dropPos.itemIndex] = app;
+        } else {
+          // 빈 슬롯이 아닌 곳에 드롭 → 현재 페이지 첫 번째 빈 슬롯에 배치
+          const curPage = useDesktopStore.getState().currentPage;
+          const emptyIdx = nextPages[curPage].findIndex((it) => it.type === "empty");
+          if (emptyIdx !== -1) nextPages[curPage][emptyIdx] = app;
+        }
+
+        setPages(nextPages);
+      }
+      return;
+    }
+
+    // clearFolderHover 전에 의도 완료 상태 저장
+    // 조건: 타이머 null(500ms 완료됨) + ref에 타겟 있음 = "드롭하면 폴더 생성" 의도 확정
+    const completedHoverTarget =
+      folderHoverTimerRef.current === null && folderHoverTargetRef.current
+        ? folderHoverTargetRef.current
+        : null;
+    // 폴더 hover 타이머 정리 — 단일 지점
+    clearFolderHover();
     setActiveId(null);
     if (!over) return;
 
@@ -320,8 +504,44 @@ export default function Desktop() {
       return;
     }
 
-    // B. 앱 → 앱 위로 드롭 (arrayMove 삽입 정렬 또는 페이지 간 교환)
-    if (fromPage === toPage) {
+    // B. 앱 → 폴더 위로 드롭 (500ms hover 완료 시에만 폴더에 앱 추가)
+    if (toItem.type === 'folder') {
+      // 500ms 미충족 — 단순 통과 드롭 → 무시 (앱 원위치)
+      if (!completedHoverTarget || completedHoverTarget !== overId) return;
+      // active 아이템을 folder.items 맨 뒤에 추가
+      nextPages[toPage][toIndex] = {
+        ...toItem,
+        items: [...toItem.items, fromPos.item],
+      };
+      // active 원래 위치를 빈 슬롯으로 교체
+      nextPages[fromPage][fromIndex] = {
+        id: `empty-${fromPage}-${fromIndex}-${Date.now()}`,
+        type: 'empty',
+      };
+      setPages(nextPages);
+      return;
+    }
+
+    // C. 앱 → 앱 위로 드롭
+    // - completedHoverTarget === overId: 500ms hover 완료 후 DROP → 폴더 생성
+    // - 그 외: arrayMove 삽입 정렬 또는 페이지 간 교환
+    if (completedHoverTarget && completedHoverTarget === overId) {
+      // 폴더 생성 — DROP 시에만 실행
+      const newFolderId = `folder-${crypto.randomUUID().split("-")[0]}`;
+      const newFolder = {
+        id: newFolderId,
+        type: "folder",
+        name: "새 폴더",
+        items: [fromPos.item, toItem],
+      };
+      // over 위치에 새 폴더 배치
+      nextPages[toPage][toIndex] = newFolder;
+      // active 원래 위치를 빈 슬롯으로 교체
+      nextPages[fromPage][fromIndex] = {
+        id: `empty-${fromPage}-${fromIndex}-${Date.now()}`,
+        type: "empty",
+      };
+    } else if (fromPage === toPage) {
       nextPages[fromPage] = arrayMove(nextPages[fromPage], fromIndex, toIndex);
     } else {
       const temp = nextPages[fromPage][fromIndex];
@@ -370,6 +590,8 @@ export default function Desktop() {
           sensors={sensors}
           collisionDetection={createEdgeCollision(wrapperRef)}
           onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
           <div className={styles.desktopViewport}>
@@ -389,6 +611,16 @@ export default function Desktop() {
                       {pageItems.map((item) => {
                         if (item.type === 'empty') {
                           return <EmptySlot key={item.id} id={item.id} />;
+                        }
+
+                        if (item.type === 'folder') {
+                          return (
+                            <FolderIcon
+                              key={item.id}
+                              folder={item}
+                              openFolder={() => setOpenedFolderId(item.id)}
+                            />
+                          );
                         }
 
                         return (
@@ -416,15 +648,30 @@ export default function Desktop() {
           )}
 
           <DragOverlay dropAnimation={dropAnimationConfig}>
-            {activeItem && activeItem.type !== 'empty' ? (
+            {draggingFromFolderApp ? (
+              // 폴더 모달 앱 꺼내기 — 모달이 닫히고 DragOverlay가 앱을 이어받음
               <div style={{
                 transform: 'scale(1.15)',
                 filter: 'drop-shadow(0 8px 20px rgba(0, 0, 0, 0.5))',
               }}>
-                <AppIconOverlay app={activeItem} />
+                <AppIconOverlay app={draggingFromFolderApp.app} />
+              </div>
+            ) : activeItem && activeItem.type !== 'empty' ? (
+              <div style={{
+                transform: 'scale(1.15)',
+                filter: 'drop-shadow(0 8px 20px rgba(0, 0, 0, 0.5))',
+              }}>
+                {activeItem.type === 'folder' ? (
+                  <FolderIconOverlay folder={activeItem} />
+                ) : (
+                  <AppIconOverlay app={activeItem} />
+                )}
               </div>
             ) : null}
           </DragOverlay>
+
+          {/* 폴더 열기 모달 — DndContext 안에서 렌더링 (useDraggable DnD 핸드오프를 위해) */}
+          <FolderModal />
         </DndContext>
       </div>
 

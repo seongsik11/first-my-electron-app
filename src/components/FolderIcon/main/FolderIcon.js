@@ -3,7 +3,8 @@ import styles from "./FolderIcon.module.css";
 import useDesktopStore from "../../Desktop/store/state";
 
 // 앱 아이콘이 없는 경우를 위해 간단한 플레이스홀더
-function getAppIcon(app) {
+// named export — FolderModal에서도 import해서 사용
+export function getAppIcon(app) {
   if (app.icon && typeof app.icon === "string" && app.icon.length > 0) {
     return app.icon;
   }
@@ -37,6 +38,9 @@ export default function AppIcon({ app, openApp }) {
 
   // activeId: smooth reorder transition 조건부 적용용
   const activeId = useDesktopStore((state) => state.activeId);
+  // hoverTargetId: One UI 시각 피드백용 — 폴더 생성 hover 중인 대상 아이콘 강조
+  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
+  const isHoverTarget = hoverTargetId === app.id;
 
   const style = {
     transform: transform
@@ -58,12 +62,73 @@ export default function AppIcon({ app, openApp }) {
       {...listeners}
       style={style}
       onDoubleClick={openApp}
-      className={styles.appIcon}
+      className={`${styles.appIcon}${isHoverTarget ? ` ${styles.folderHoverTarget}` : ""}`}
     >
       <div className={styles.iconWrapper}>
         <img src={getAppIcon(app)} alt={app.name} />
       </div>
       <span className={styles.label}>{app.name}</span>
+    </div>
+  );
+}
+
+/** 폴더 아이콘 (정렬 가능한 폴더) */
+export function FolderIcon({ folder, openFolder }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: folder.id, animateLayoutChanges });
+
+  const activeId = useDesktopStore((state) => state.activeId);
+  // hoverTargetId: 앱→폴더 500ms hover 시각 피드백용
+  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
+  const isHoverTarget = hoverTargetId === folder.id;
+
+  const style = {
+    transform: transform
+      ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
+      : undefined,
+    transition: activeId ? transition : undefined,
+    opacity: isDragging ? 0 : 1,
+    cursor: "grab",
+  };
+
+  // 최대 9개 썸네일 (3×3 그리드)
+  const thumbItems = (folder.items || []).slice(0, 9);
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-sortable="true"
+      {...attributes}
+      {...listeners}
+      style={style}
+      onDoubleClick={openFolder}
+      className={`${styles.folderIcon}${isHoverTarget ? ` ${styles.folderHoverTarget}` : ""}`}
+    >
+      <div className={styles.thumbGrid}>
+        {thumbItems.map((app) => (
+          <div key={app.id} className={styles.thumbItem}>
+            <img src={getAppIcon(app)} alt={app.name} />
+          </div>
+        ))}
+      </div>
+      <span className={styles.label}>{folder.name}</span>
+    </div>
+  );
+}
+
+/** 폴더 드래그 오버레이용 */
+export function FolderIconOverlay({ folder }) {
+  const thumbItems = (folder.items || []).slice(0, 9);
+  return (
+    <div className={styles.folderIcon} style={{ cursor: "grabbing" }}>
+      <div className={styles.thumbGrid}>
+        {thumbItems.map((app) => (
+          <div key={app.id} className={styles.thumbItem}>
+            <img src={getAppIcon(app)} alt={app.name} />
+          </div>
+        ))}
+      </div>
+      <span className={styles.label}>{folder.name}</span>
     </div>
   );
 }
