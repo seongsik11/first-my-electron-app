@@ -112,10 +112,6 @@ export default function Desktop() {
   const folderHoverTargetRef = useRef(null);
   // 엣지 자동 슬라이드 타이머 (350ms)
   const edgeSlideTimerRef = useRef(null);
-  // 실시간 reorder preview — 이전 over 타겟 기억 (중복 setPages 방지)
-  const lastPreviewTargetRef = useRef(null);
-  // 드래그 시작 시점 pages 스냅샷 — 취소(Escape) 시 복구 및 handleDragEnd 기준 계산용
-  const dragStartPagesRef = useRef(null);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -325,36 +321,6 @@ export default function Desktop() {
     // 엣지 아닌 곳 → 슬라이드 타이머 클리어
     clearEdgeSlide();
 
-    // 실시간 reorder preview — dragStartPagesRef 기준으로 계산 (double-arrayMove 방지)
-    const activeItemId = String(active.id);
-    if (activeItemId !== overId && overId !== lastPreviewTargetRef.current) {
-      const basePages = dragStartPagesRef.current;
-      if (basePages) {
-        const previewFromPos = findItemPosition(basePages, activeItemId);
-        const previewToPos = findItemPosition(basePages, overId);
-        if (previewFromPos && previewToPos && previewFromPos.item.type !== 'empty') {
-          const { pageIndex: fromPage, itemIndex: fromIndex } = previewFromPos;
-          const { pageIndex: toPage, itemIndex: toIndex } = previewToPos;
-          const previewPages = basePages.map((p) => [...p]);
-
-          if (fromPage === toPage) {
-            // 같은 페이지 — arrayMove preview
-            previewPages[fromPage] = arrayMove(previewPages[fromPage], fromIndex, toIndex);
-            lastPreviewTargetRef.current = overId;
-            setPages(previewPages);
-          } else if (previewToPos.item.type === 'empty') {
-            // 다른 페이지 + 빈 슬롯 — swap preview
-            const temp = previewPages[fromPage][fromIndex];
-            previewPages[fromPage][fromIndex] = previewPages[toPage][toIndex];
-            previewPages[toPage][toIndex] = temp;
-            lastPreviewTargetRef.current = overId;
-            setPages(previewPages);
-          }
-          // 다른 페이지 + 앱/폴더 → preview 없음 (handleDragEnd에서 처리)
-        }
-      }
-    }
-
     // over 아이템 조회 (최신 pages 사용)
     const currentPages = useDesktopStore.getState().pages;
     const overPos = findItemPosition(currentPages, overId);
@@ -406,10 +372,6 @@ export default function Desktop() {
   const handleDragStart = (event) => {
     const { active } = event;
     setActiveId(active.id);
-    // 드래그 시작 시점 pages 스냅샷 저장 (취소 복구 및 handleDragEnd 기준)
-    dragStartPagesRef.current = useDesktopStore.getState().pages;
-    // preview 타겟 초기화
-    lastPreviewTargetRef.current = null;
 
     // 폴더 모달 앱 드래그 감지 — id 패턴: folder-app-{appId}
     // 모달은 닫지 않음 — onDragMove에서 포인터가 모달 영역 바깥으로 나갈 때 닫힘
@@ -453,24 +415,12 @@ export default function Desktop() {
   const handleDragCancel = () => {
     clearFolderHover();
     clearEdgeSlide(); // 취소 시 엣지 슬라이드 타이머 정리
-    // preview로 변경된 pages를 드래그 시작 시점 스냅샷으로 복구
-    if (dragStartPagesRef.current) {
-      setPages(dragStartPagesRef.current);
-      dragStartPagesRef.current = null;
-    }
-    lastPreviewTargetRef.current = null;
     setActiveId(null);
     setDraggingFromFolderApp(null);
   };
 
   const handleDragEnd = (event) => {
     clearEdgeSlide(); // 드래그 종료 시 엣지 슬라이드 타이머 정리
-    // preview ref 초기화 + 드래그 시작 스냅샷 캡처 (handleDragEnd 계산 기준)
-    // lastPreviewTarget 먼저 캡처 — null 처리 전에 확인 필요
-    const lastPreviewTarget = lastPreviewTargetRef.current;
-    lastPreviewTargetRef.current = null;
-    const originalPages = dragStartPagesRef.current;
-    dragStartPagesRef.current = null;
     const { active, over } = event;
 
     // 폴더 모달에서 DnD로 앱 꺼내기 처리
@@ -549,11 +499,9 @@ export default function Desktop() {
     const activeItemId = active.id;
     const overId = String(over.id);
 
-    // preview로 변경된 pages 대신 드래그 시작 스냅샷을 기준으로 최종 배치 계산
-    // (double-arrayMove 방지: preview는 순수 시각적 피드백, handleDragEnd가 확정)
+    // 현재 pages 최신 상태 기준으로 최종 배치 계산
     const latestPages = useDesktopStore.getState().pages;
-    const basePages = originalPages || latestPages;
-    const fromPos = findItemPosition(basePages, activeItemId);
+    const fromPos = findItemPosition(latestPages, activeItemId);
     if (!fromPos || fromPos.item.type === 'empty') return;
 
     // 1) 페이지 가장자리 드롭 — 페이지 이동은 handleDragOver 타이머에서 이미 완료됨
@@ -561,7 +509,7 @@ export default function Desktop() {
     if (overId === "page-right" || overId === "page-left") {
       const { pageIndex, itemIndex, item } = fromPos;
       const curPage = useDesktopStore.getState().currentPage;
-      const nextPages = basePages.map(p => [...p]);
+      const nextPages = latestPages.map(p => [...p]);
       const emptyIdx = nextPages[curPage].findIndex(it => it.type === 'empty');
       if (emptyIdx !== -1) {
         // 원래 위치를 빈 슬롯으로 교체
@@ -578,20 +526,17 @@ export default function Desktop() {
 
     if (activeItemId === overId) return;
 
-    // 2) 일반 드래그 로직 — basePages 기준으로 최종 위치 확정
-    const toPos = findItemPosition(basePages, overId);
+    // 2) 일반 드래그 로직 — latestPages 기준으로 최종 위치 확정
+    const toPos = findItemPosition(latestPages, overId);
     if (!toPos) return;
 
     const { pageIndex: fromPage, itemIndex: fromIndex } = fromPos;
     const { pageIndex: toPage, itemIndex: toIndex, item: toItem } = toPos;
 
-    const nextPages = basePages.map((p) => [...p]);
+    const nextPages = latestPages.map((p) => [...p]);
 
-    // A. 앱 → 빈 슬롯 위로 드롭
-    // preview(arrayMove/swap)에서 이미 정확한 위치에 배치됨 → return만
-    // preview 없었던 경우(lastPreviewTarget 불일치) → swap으로 직접 배치
+    // A. 앱 → 빈 슬롯 위로 드롭 — swap으로 배치
     if (toItem.type === 'empty') {
-      if (lastPreviewTarget === overId) return;
       const temp = nextPages[fromPage][fromIndex];
       nextPages[fromPage][fromIndex] = nextPages[toPage][toIndex];
       nextPages[toPage][toIndex] = temp;
@@ -637,9 +582,7 @@ export default function Desktop() {
         type: "empty",
       };
     } else if (fromPage === toPage) {
-      // preview에서 이미 arrayMove 처리됨 → return만
-      // preview 없었던 경우 → arrayMove로 직접 처리
-      if (lastPreviewTarget === overId) return;
+      // 같은 페이지 내 — arrayMove로 삽입 정렬
       nextPages[fromPage] = arrayMove(nextPages[fromPage], fromIndex, toIndex);
     } else {
       const temp = nextPages[fromPage][fromIndex];
