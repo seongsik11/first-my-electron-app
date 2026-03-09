@@ -1,7 +1,9 @@
 import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 
-export default function PageDropZone({ id, side }) {
+// isActive: 드래그 중일 때만 true — 항상 마운트 유지로 dnd-kit rect 측정 보장
+// (조건부 마운트 시 rect.current=null → over=null → 페이지 전환 실패 버그 방지)
+export default function PageDropZone({ id, side, isActive }) {
   const { isOver, setNodeRef } = useDroppable({ id });
 
   // side에 따른 그라데이션 방향 및 색상 설정
@@ -23,7 +25,10 @@ export default function PageDropZone({ id, side }) {
     height: "100%",
     width: "40px", // Desktop.js EDGE_ZONE_WIDTH 와 동일하게
     zIndex: 50, // 아이콘들보다 위에 위치해서 드랍이 잘 인식되도록
-    pointerEvents: "auto",
+    // 드래그 중이 아닐 때: 완전 투명 + 포인터 이벤트 차단 (일반 클릭 방해 없음)
+    // 드래그 중일 때: 포인터 이벤트 활성화 + 시각 피드백
+    pointerEvents: isActive ? "auto" : "none",
+    opacity: isActive ? 1 : 0,
     // isOver 상태일 때만 그라데이션 적용
     background: isOver ? activeGradient : "transparent",
     // 부드럽게 나타나고 사라지도록 트랜지션 추가

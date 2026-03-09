@@ -110,6 +110,8 @@ export default function Desktop() {
   const folderHoverTimerRef = useRef(null);
   // 현재 hover 중인 타겟 id — 타이머 재시작 방지용
   const folderHoverTargetRef = useRef(null);
+  // 엣지 자동 슬라이드 타이머 (350ms)
+  const edgeSlideTimerRef = useRef(null);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -270,21 +272,54 @@ export default function Desktop() {
     setHoverTargetId(null);
   };
 
-  // onDragOver: 앱→앱 500ms hover 시 폴더 자동 생성 (One UI 패턴)
+  // 엣지 슬라이드 타이머 정리 헬퍼
+  const clearEdgeSlide = () => {
+    if (edgeSlideTimerRef.current) {
+      clearTimeout(edgeSlideTimerRef.current);
+      edgeSlideTimerRef.current = null;
+    }
+  };
+
+  // onDragOver: 엣지 자동 슬라이드 (350ms) + 앱→앱 500ms hover 시 폴더 자동 생성 (One UI 패턴)
   const handleDragOver = (event) => {
     const { active, over } = event;
     if (!over) {
       clearFolderHover();
+      clearEdgeSlide(); // 엣지 벗어나면 타이머 클리어
       return;
     }
 
     const overId = String(over.id);
 
-    // 엣지 zone이면 hover 취소
-    if (overId === "page-left" || overId === "page-right") {
+    // 엣지 자동 슬라이드 처리
+    if (overId === "page-right" || overId === "page-left") {
       clearFolderHover();
+
+      // 이미 타이머 진행 중이면 재시작 안 함 (연속 슬라이드는 타이머 완료 후 자동 재시작)
+      if (edgeSlideTimerRef.current) return;
+
+      const isRight = overId === "page-right";
+      const curPage = currentPageRef.current;
+      const pagesLen = pagesLengthRef.current;
+
+      // 경계 조건: 첫 페이지 왼쪽, 마지막 페이지 오른쪽은 타이머 없음
+      if (isRight && curPage >= pagesLen - 1) return;
+      if (!isRight && curPage <= 0) return;
+
+      edgeSlideTimerRef.current = setTimeout(() => {
+        edgeSlideTimerRef.current = null; // null로 만들어 연속 슬라이드 허용
+        const nextPage = isRight
+          ? currentPageRef.current + 1
+          : currentPageRef.current - 1;
+        const clampedPage = Math.max(0, Math.min(nextPage, pagesLengthRef.current - 1));
+        setCurrentPage(clampedPage);
+      }, 350); // 350ms — One UI 참고값
+
       return;
     }
+
+    // 엣지 아닌 곳 → 슬라이드 타이머 클리어
+    clearEdgeSlide();
 
     // over 아이템 조회 (최신 pages 사용)
     const currentPages = useDesktopStore.getState().pages;
@@ -376,7 +411,16 @@ export default function Desktop() {
     }
   };
 
+  // 드래그 취소(Escape 등) 시 상태 정리 — draggingFromFolderApp이 남으면 이후 모든 드래그가 잘못된 경로로 진입
+  const handleDragCancel = () => {
+    clearFolderHover();
+    clearEdgeSlide(); // 취소 시 엣지 슬라이드 타이머 정리
+    setActiveId(null);
+    setDraggingFromFolderApp(null);
+  };
+
   const handleDragEnd = (event) => {
+    clearEdgeSlide(); // 드래그 종료 시 엣지 슬라이드 타이머 정리
     const { active, over } = event;
 
     // 폴더 모달에서 DnD로 앱 꺼내기 처리
@@ -447,39 +491,27 @@ export default function Desktop() {
     const overId = String(over.id);
 
     // 빈 슬롯은 드래그 시작 자체가 안되지만, 혹시 모를 예외 처리
-    const fromPos = findItemPosition(pages, activeItemId);
+    // draggingFromFolderApp 경로와 동일한 패턴으로 최신 pages 획득 (stale closure 방지)
+    const latestPages = useDesktopStore.getState().pages;
+    const fromPos = findItemPosition(latestPages, activeItemId);
     if (!fromPos || fromPos.item.type === 'empty') return;
 
-    // 1) 페이지 가장자리 드롭 (페이지 이동)
+    // 1) 페이지 가장자리 드롭 — 페이지 이동은 handleDragOver 타이머에서 이미 완료됨
+    // fallback: 엣지 위에서 드롭된 경우, 현재 페이지(슬라이드 완료 후) 첫 빈 슬롯에 배치
     if (overId === "page-right" || overId === "page-left") {
       const { pageIndex, itemIndex, item } = fromPos;
-      let targetPageIdx = overId === "page-right" ? pageIndex + 1 : pageIndex - 1;
-
-      if (targetPageIdx < 0) return;
-
-      const nextPages = pages.map(p => [...p]);
-
-      // 대상 페이지가 없으면 새로 생성 (PAGE_SIZE 개 빈 슬롯)
-      if (targetPageIdx >= nextPages.length) {
-        nextPages.push(Array.from({ length: PAGE_SIZE }, () => ({
-          id: `empty-${pageIndex}-${itemIndex}-${crypto.randomUUID().split('-')[0]}`,
-          type: 'empty'
-        })));
-      }
-
-      const targetPage = nextPages[targetPageIdx];
-      const firstEmptyIdx = targetPage.findIndex(it => it.type === 'empty');
-
-      if (firstEmptyIdx !== -1) {
-        // 원래 위치는 빈 슬롯으로 교체
+      const curPage = useDesktopStore.getState().currentPage;
+      const nextPages = latestPages.map(p => [...p]);
+      const emptyIdx = nextPages[curPage].findIndex(it => it.type === 'empty');
+      if (emptyIdx !== -1) {
+        // 원래 위치를 빈 슬롯으로 교체
         nextPages[pageIndex][itemIndex] = {
-          id: `empty-${pageIndex}-${itemIndex}-${Date.now()}`,
+          id: `empty-${pageIndex}-${itemIndex}`,
           type: 'empty'
         };
-        // 타겟 페이지의 빈 슬롯 자리에 앱 배치
-        targetPage[firstEmptyIdx] = item;
+        // 현재 페이지 첫 빈 슬롯에 배치
+        nextPages[curPage][emptyIdx] = item;
         setPages(nextPages);
-        setCurrentPage(targetPageIdx);
       }
       return;
     }
@@ -487,13 +519,13 @@ export default function Desktop() {
     if (activeItemId === overId) return;
 
     // 2) 일반 드래그 로직
-    const toPos = findItemPosition(pages, overId);
+    const toPos = findItemPosition(latestPages, overId);
     if (!toPos) return;
 
     const { pageIndex: fromPage, itemIndex: fromIndex } = fromPos;
     const { pageIndex: toPage, itemIndex: toIndex, item: toItem } = toPos;
 
-    const nextPages = pages.map((p) => [...p]);
+    const nextPages = latestPages.map((p) => [...p]);
 
     // A. 앱 → 빈 슬롯 위로 드롭 (위치 교체)
     if (toItem.type === 'empty') {
@@ -593,6 +625,7 @@ export default function Desktop() {
           onDragMove={handleDragMove}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
           <div className={styles.desktopViewport}>
             <div
@@ -638,14 +671,12 @@ export default function Desktop() {
             </div>
           </div>
 
-          {activeId && (
-            <>
-              {currentPage !== 0 && (
-                <PageDropZone id="page-left" side="left" />
-              )}
-              <PageDropZone id="page-right" side="right" />
-            </>
+          {/* PageDropZone은 항상 마운트 유지 — 조건부 마운트 시 rect.current=null로 over=null이 되어
+              페이지 전환 드래그가 항상 실패하는 버그 발생. isActive prop으로 가시성/포인터 이벤트 제어 */}
+          {currentPage !== 0 && (
+            <PageDropZone id="page-left" side="left" isActive={!!activeId} />
           )}
+          <PageDropZone id="page-right" side="right" isActive={!!activeId} />
 
           <DragOverlay dropAnimation={dropAnimationConfig}>
             {draggingFromFolderApp ? (
