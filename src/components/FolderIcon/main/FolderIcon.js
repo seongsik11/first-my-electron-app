@@ -38,17 +38,17 @@ export default function AppIcon({ app, openApp }) {
 
   // activeId: smooth reorder transition 조건부 적용용
   const activeId = useDesktopStore((state) => state.activeId);
-  // hoverTargetId: One UI 시각 피드백용 — 폴더 생성 hover 중인 대상 아이콘 강조
-  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
-  const isHoverTarget = hoverTargetId === app.id;
+  // folderCandidateTargetId: 면적 80% 이상 감지된 타겟 id (시각 피드백용)
+  const folderCandidateTargetId = useDesktopStore((state) => state.folderCandidateTargetId);
+  const isFolderCandidate = folderCandidateTargetId === app.id;
 
   const style = {
     transform: transform
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
-    // useSortable이 반환한 transition을 activeId 조건부로 적용
-    // activeId=null(드롭 시) → transition=undefined로 동시 적용 → FLIP 버그 불가 (React 18 batching)
-    transition: activeId ? transition : undefined,
+    // FOLDER_CANDIDATE 상태(folderCandidateTargetId !== null)에서는 transition 차단
+    // → 주변 아이콘의 Reorder 애니메이션 완전 중단 (drag-logic.md 요구사항)
+    transition: (activeId && folderCandidateTargetId === null) ? transition : undefined,
     // 드래그 중인 원본 아이콘은 완전 숨김 (DragOverlay가 대체)
     opacity: isDragging ? 0 : 1,
     cursor: "grab",
@@ -58,11 +58,12 @@ export default function AppIcon({ app, openApp }) {
     <div
       ref={setNodeRef}
       data-sortable="true"
+      data-id={app.id}
       {...attributes}
       {...listeners}
       style={style}
       onDoubleClick={openApp}
-      className={`${styles.appIcon}${isHoverTarget ? ` ${styles.folderHoverTarget}` : ""}`}
+      className={`${styles.appIcon}${isFolderCandidate ? ` ${styles.folderHoverTarget}` : ""}`}
     >
       <div className={styles.iconWrapper}>
         <img src={getAppIcon(app)} alt={app.name} />
@@ -78,15 +79,17 @@ export function FolderIcon({ folder, openFolder }) {
     useSortable({ id: folder.id, animateLayoutChanges });
 
   const activeId = useDesktopStore((state) => state.activeId);
-  // hoverTargetId: 앱→폴더 500ms hover 시각 피드백용
-  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
-  const isHoverTarget = hoverTargetId === folder.id;
+  // folderCandidateTargetId: 면적 80% 이상 감지된 타겟 id (시각 피드백용)
+  const folderCandidateTargetId = useDesktopStore((state) => state.folderCandidateTargetId);
+  const isFolderCandidate = folderCandidateTargetId === folder.id;
 
   const style = {
     transform: transform
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
-    transition: activeId ? transition : undefined,
+    // FOLDER_CANDIDATE 상태(folderCandidateTargetId !== null)에서는 transition 차단
+    // → 주변 아이콘의 Reorder 애니메이션 완전 중단 (drag-logic.md 요구사항)
+    transition: (activeId && folderCandidateTargetId === null) ? transition : undefined,
     opacity: isDragging ? 0 : 1,
     cursor: "grab",
   };
@@ -98,11 +101,12 @@ export function FolderIcon({ folder, openFolder }) {
     <div
       ref={setNodeRef}
       data-sortable="true"
+      data-id={folder.id}
       {...attributes}
       {...listeners}
       style={style}
       onDoubleClick={openFolder}
-      className={`${styles.folderIcon}${isHoverTarget ? ` ${styles.folderHoverTarget}` : ""}`}
+      className={`${styles.folderIcon}${isFolderCandidate ? ` ${styles.folderHoverTarget}` : ""}`}
     >
       <div className={styles.thumbGrid}>
         {thumbItems.map((app) => (
@@ -140,13 +144,16 @@ export function EmptySlot({ id }) {
   const { setNodeRef, attributes, transform, transition } = useSortable({ id, animateLayoutChanges });
   // EmptySlot도 smooth reorder를 위해 activeId 읽기
   const activeId = useDesktopStore((state) => state.activeId);
+  // folderCandidateTargetId: FOLDER_CANDIDATE 상태에서 transition 차단 (AppIcon/FolderIcon과 동일)
+  const folderCandidateTargetId = useDesktopStore((state) => state.folderCandidateTargetId);
 
   const style = {
     transform: transform
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
-    // AppIcon과 동일한 조건부 transition -- activeId=null 시 undefined
-    transition: activeId ? transition : undefined,
+    // FOLDER_CANDIDATE 상태(folderCandidateTargetId !== null)에서는 transition 차단
+    // → 주변 아이콘의 Reorder 애니메이션 완전 중단 (drag-logic.md 요구사항)
+    transition: (activeId && folderCandidateTargetId === null) ? transition : undefined,
     height: "100px",
     width: "100%",
   };
