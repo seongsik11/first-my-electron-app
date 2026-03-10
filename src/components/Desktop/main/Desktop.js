@@ -9,6 +9,30 @@ import useDesktopStore from "../store/state";
 
 const EDGE_ZONE_WIDTH = 40;
 
+// 폴더 생성 hover 겹침 비율 임계값
+const FOLDER_HOVER_OVERLAP_START = 0.8; // 타이머 시작 최소 비율 (80%)
+const FOLDER_HOVER_OVERLAP_MIN   = 0.6; // 폴더 생성 허용 최소 비율 (60%)
+
+/**
+ * 드래그 아이템 rect 기준 over 아이템과의 겹침 비율 계산
+ * @param {{ left, right, top, bottom, width, height }} dragRect
+ * @param {{ left, right, top, bottom, width, height }} targetRect
+ * @returns {number} 0~1 (교차 면적 / 드래그 아이템 면적)
+ */
+function calcOverlapRatio(dragRect, targetRect) {
+  const xOverlap = Math.max(
+    0,
+    Math.min(dragRect.right, targetRect.right) - Math.max(dragRect.left, targetRect.left)
+  );
+  const yOverlap = Math.max(
+    0,
+    Math.min(dragRect.bottom, targetRect.bottom) - Math.max(dragRect.top, targetRect.top)
+  );
+  const dragArea = dragRect.width * dragRect.height;
+  if (dragArea === 0) return 0;
+  return (xOverlap * yOverlap) / dragArea;
+}
+
 /**
  * 간단한 충돌 감지 (엣지 감지 + rectIntersection)
  */
@@ -112,6 +136,8 @@ export default function Desktop() {
   const folderHoverTargetRef = useRef(null);
   // 엣지 자동 슬라이드 타이머 (350ms)
   const edgeSlideTimerRef = useRef(null);
+  // 마지막으로 계산된 겹침 비율 — handleDragEnd에서 드롭 시점 조건 판별에 사용
+  const lastOverlapRatioRef = useRef(0);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -334,7 +360,27 @@ export default function Desktop() {
     // over가 folder 타입인 경우 — 앱→앱과 동일한 500ms 타이머 패턴
     // 단순 통과와 "폴더에 추가하려는 의도"를 구분하기 위해
     if (overPos.item.type === "folder") {
+      const dragRect = active.rect.current.translated;
+      const overRect = over.rect;
+      // dragRect가 아직 null이면 안전하게 무시
+      if (!dragRect) { clearFolderHover(); return; }
+      const overlapRatio = calcOverlapRatio(dragRect, overRect);
+      lastOverlapRatioRef.current = overlapRatio;
+
+      // 60% 미만 → 타이머 리셋
+      if (overlapRatio < FOLDER_HOVER_OVERLAP_MIN) {
+        clearFolderHover();
+        return;
+      }
+      // 같은 타겟 + 60% 이상 유지 → 현재 상태 유지 (타이머 진행 중이면 유지, 완료됐으면 완료 상태 유지)
+      // ⚠️ 60% 미만 체크가 반드시 이 가드보다 먼저 와야 함 (완료 상태도 취소 가능하도록)
       if (folderHoverTargetRef.current === overId) return;
+      // 새 타겟 + 80% 미만 → 타이머 시작 안 함 (자리 교환 구간)
+      if (overlapRatio < FOLDER_HOVER_OVERLAP_START) {
+        clearFolderHover();
+        return;
+      }
+      // 새 타겟 + 80% 이상 → 500ms 타이머 시작
       clearFolderHover();
       folderHoverTargetRef.current = overId;
       setHoverTargetId(overPos.item.id);
@@ -352,10 +398,28 @@ export default function Desktop() {
       return;
     }
 
-    // 이미 같은 타겟으로 타이머 진행 중이면 재시작 안 함 (타이머 안정성)
-    if (folderHoverTargetRef.current === overId) return;
+    // 겹침 비율 계산 — dnd-kit이 제공하는 현재 rect 사용
+    const dragRect = active.rect.current.translated;
+    const overRect = over.rect;
+    // dragRect가 아직 null이면 안전하게 무시
+    if (!dragRect) { clearFolderHover(); return; }
+    const overlapRatio = calcOverlapRatio(dragRect, overRect);
+    lastOverlapRatioRef.current = overlapRatio;
 
-    // 새 타겟 — 이전 타이머 정리 후 새 타이머 시작
+    // 60% 미만 → 타이머 리셋, 자리 교환 처리
+    if (overlapRatio < FOLDER_HOVER_OVERLAP_MIN) {
+      clearFolderHover();
+      return;
+    }
+    // 같은 타겟이 계속 hover 중 (60% 이상 유지) → 현재 상태 유지, 재시작 없음
+    // ⚠️ 60% 미만 체크가 반드시 이 가드보다 먼저 와야 함
+    if (folderHoverTargetRef.current === overId) return;
+    // 새 타겟 + 80% 미만 → 타이머 시작 안 함 (자리 교환 구간)
+    if (overlapRatio < FOLDER_HOVER_OVERLAP_START) {
+      clearFolderHover();
+      return;
+    }
+    // 새 타겟 + 80% 이상 → 500ms 타이머 시작
     clearFolderHover();
     folderHoverTargetRef.current = overId;
     setHoverTargetId(overPos.item.id);
@@ -486,9 +550,11 @@ export default function Desktop() {
     }
 
     // clearFolderHover 전에 의도 완료 상태 저장
-    // 조건: 타이머 null(500ms 완료됨) + ref에 타겟 있음 = "드롭하면 폴더 생성" 의도 확정
+    // 조건: 타이머 null(500ms 완료됨) + ref에 타겟 있음 + 마지막 겹침 비율 60% 이상
     const completedHoverTarget =
-      folderHoverTimerRef.current === null && folderHoverTargetRef.current
+      folderHoverTimerRef.current === null &&
+      folderHoverTargetRef.current &&
+      lastOverlapRatioRef.current >= FOLDER_HOVER_OVERLAP_MIN
         ? folderHoverTargetRef.current
         : null;
     // 폴더 hover 타이머 정리 — 단일 지점
