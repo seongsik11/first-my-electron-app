@@ -45,7 +45,7 @@ export default function AppIcon({ app, openApp }) {
   const style = {
     // hoverTargetId가 설정된 동안 transform 동결 — 타겟 앱이 밀려나지 않도록
     // hoverTargetId=null(일반 드래그)이면 live reorder 그대로 동작
-    transform: (transform && !hoverTargetId)
+    transform: (transform && !folderCandidateTargetId)
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
     // useSortable이 반환한 transition을 activeId 조건부로 적용
@@ -86,8 +86,8 @@ export function FolderIcon({ folder, openFolder }) {
   const isHoverTarget = folderCandidateTargetId === folder.id;
 
   const style = {
-    // hoverTargetId가 설정된 동안 transform 동결 — AppIcon과 동일 패턴
-    transform: (transform && !hoverTargetId)
+    // folderCandidateTargetId가 설정된 동안 transform 동결 — AppIcon과 동일 패턴
+    transform: (transform && !folderCandidateTargetId)
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
     transition: activeId ? transition : undefined,
