@@ -9,6 +9,30 @@ import useDesktopStore from "../store/state";
 
 const EDGE_ZONE_WIDTH = 40;
 
+// 폴더 생성 hover 겹침 비율 임계값
+const FOLDER_HOVER_OVERLAP_START = 0.8; // 타이머 시작 최소 비율 (80%)
+const FOLDER_HOVER_OVERLAP_MIN   = 0.6; // 폴더 생성 허용 최소 비율 (60%)
+
+/**
+ * 드래그 아이템 rect 기준 over 아이템과의 겹침 비율 계산
+ * @param {{ left, right, top, bottom, width, height }} dragRect
+ * @param {{ left, right, top, bottom, width, height }} targetRect
+ * @returns {number} 0~1 (교차 면적 / 드래그 아이템 면적)
+ */
+function calcOverlapRatio(dragRect, targetRect) {
+  const xOverlap = Math.max(
+    0,
+    Math.min(dragRect.right, targetRect.right) - Math.max(dragRect.left, targetRect.left)
+  );
+  const yOverlap = Math.max(
+    0,
+    Math.min(dragRect.bottom, targetRect.bottom) - Math.max(dragRect.top, targetRect.top)
+  );
+  const dragArea = dragRect.width * dragRect.height;
+  if (dragArea === 0) return 0;
+  return (xOverlap * yOverlap) / dragArea;
+}
+
 /**
  * 간단한 충돌 감지 (엣지 감지 + rectIntersection)
  */
@@ -68,6 +92,34 @@ function findItemPosition(pages, id) {
   return null;
 }
 
+// 드래그 중인 아이콘(dragRect)과 타겟 아이콘(targetEl DOM) 간 겹침 면적 비율을 계산한다.
+// 비율 기준: min(두 아이콘 면적) 대비 교집합 면적.
+// @param {DOMRect} dragRect  - DragOverlay 또는 dragging 아이콘의 현재 bounding rect
+// @param {Element} targetEl  - 타겟 아이콘의 DOM 요소
+// @returns {number} 0.0 ~ 1.0 (겹침 비율)
+function calcIntersectionRatio(dragRect, targetEl) {
+  const targetRect = targetEl.getBoundingClientRect();
+
+  // 교집합 영역 계산
+  const left   = Math.max(dragRect.left,   targetRect.left);
+  const right  = Math.min(dragRect.right,  targetRect.right);
+  const top    = Math.max(dragRect.top,    targetRect.top);
+  const bottom = Math.min(dragRect.bottom, targetRect.bottom);
+
+  if (right <= left || bottom <= top) return 0; // 겹침 없음
+
+  const intersectionArea = (right - left) * (bottom - top);
+  const dragArea   = dragRect.width  * dragRect.height;
+  const targetArea = targetRect.width * targetRect.height;
+  const minArea    = Math.min(dragArea, targetArea);
+
+  if (minArea === 0) return 0;
+  return intersectionArea / minArea;
+}
+
+// 면적 기반 폴더 생성 겹침 임계값 (60% 이상 겹침 시 FOLDER_CANDIDATE 모드 진입)
+const FOLDER_THRESHOLD = 0.6;
+
 function runAppSafe(app) {
   if (!app || !app.path) return;
   try {
@@ -106,12 +158,14 @@ export default function Desktop() {
   const isInitialLoad = useRef(true);
   // 드래그 중 여부 (마우스 스와이프와 충돌 방지용)
   const activeIdRef = useRef(null);
-  // 폴더 생성 hover 타이머 (500ms)
-  const folderHoverTimerRef = useRef(null);
-  // 현재 hover 중인 타겟 id — 타이머 재시작 방지용
-  const folderHoverTargetRef = useRef(null);
+  // 드래그 중 DnD 모드 상태 머신: 'NEUTRAL' | 'REORDER' | 'FOLDER_CANDIDATE'
+  const dndModeRef = useRef('NEUTRAL');
+  // 폴더 생성 후보 타겟 id (dndModeRef === 'FOLDER_CANDIDATE'일 때 유효)
+  const folderCandidateTargetRef = useRef(null);
   // 엣지 자동 슬라이드 타이머 (350ms)
   const edgeSlideTimerRef = useRef(null);
+  // 마지막으로 계산된 겹침 비율 — handleDragEnd에서 드롭 시점 조건 판별에 사용
+  const lastOverlapRatioRef = useRef(0);
 
   const pages = useDesktopStore((state) => state.pages);
   const currentPage = useDesktopStore((state) => state.currentPage);
@@ -123,7 +177,7 @@ export default function Desktop() {
   const setTouchStartX = useDesktopStore((state) => state.setTouchStartX);
   const setActiveId = useDesktopStore((state) => state.setActiveId);
   const setOpenedFolderId = useDesktopStore((state) => state.setOpenedFolderId);
-  const setHoverTargetId = useDesktopStore((state) => state.setHoverTargetId);
+  const setFolderCandidateTargetId = useDesktopStore((state) => state.setFolderCandidateTargetId);
   const openedFolderId = useDesktopStore((state) => state.openedFolderId);
   const draggingFromFolderApp = useDesktopStore((state) => state.draggingFromFolderApp);
   const setDraggingFromFolderApp = useDesktopStore((state) => state.setDraggingFromFolderApp);
@@ -262,14 +316,11 @@ export default function Desktop() {
     }
   };
 
-  // 폴더 hover 타이머 정리 — 단일 지점 (handleDragEnd 최상단에서만 호출)
-  const clearFolderHover = () => {
-    if (folderHoverTimerRef.current) {
-      clearTimeout(folderHoverTimerRef.current);
-      folderHoverTimerRef.current = null;
-    }
-    folderHoverTargetRef.current = null;
-    setHoverTargetId(null);
+  // 폴더 후보 상태 초기화 — handleDragEnd/handleDragCancel 최상단에서 호출
+  const clearFolderCandidate = () => {
+    dndModeRef.current = 'NEUTRAL';
+    folderCandidateTargetRef.current = null;
+    setFolderCandidateTargetId(null);
   };
 
   // 엣지 슬라이드 타이머 정리 헬퍼
@@ -280,12 +331,12 @@ export default function Desktop() {
     }
   };
 
-  // onDragOver: 엣지 자동 슬라이드 (350ms) + 앱→앱 500ms hover 시 폴더 자동 생성 (One UI 패턴)
+  // onDragOver: 엣지 자동 슬라이드만 처리 (폴더 hover 타이머 제거됨)
+  // 폴더 생성 후보 감지는 handleDragMove(면적 계산)로 이전됨
   const handleDragOver = (event) => {
-    const { active, over } = event;
+    const { over } = event;
     if (!over) {
-      clearFolderHover();
-      clearEdgeSlide(); // 엣지 벗어나면 타이머 클리어
+      clearEdgeSlide();
       return;
     }
 
@@ -293,8 +344,6 @@ export default function Desktop() {
 
     // 엣지 자동 슬라이드 처리
     if (overId === "page-right" || overId === "page-left") {
-      clearFolderHover();
-
       // 이미 타이머 진행 중이면 재시작 안 함 (연속 슬라이드는 타이머 완료 후 자동 재시작)
       if (edgeSlideTimerRef.current) return;
 
@@ -320,53 +369,6 @@ export default function Desktop() {
 
     // 엣지 아닌 곳 → 슬라이드 타이머 클리어
     clearEdgeSlide();
-
-    // over 아이템 조회 (최신 pages 사용)
-    const currentPages = useDesktopStore.getState().pages;
-    const overPos = findItemPosition(currentPages, overId);
-
-    // over가 빈 슬롯이면 hover 취소
-    if (!overPos || overPos.item.type === "empty") {
-      clearFolderHover();
-      return;
-    }
-
-    // over가 folder 타입인 경우 — 앱→앱과 동일한 500ms 타이머 패턴
-    // 단순 통과와 "폴더에 추가하려는 의도"를 구분하기 위해
-    if (overPos.item.type === "folder") {
-      if (folderHoverTargetRef.current === overId) return;
-      clearFolderHover();
-      folderHoverTargetRef.current = overId;
-      setHoverTargetId(overPos.item.id);
-      folderHoverTimerRef.current = setTimeout(() => {
-        folderHoverTimerRef.current = null;
-        // folderHoverTargetRef.current 유지 — DROP 시 completedHoverTarget 판별용
-        // hoverTargetId 시각 피드백 유지
-      }, 500);
-      return;
-    }
-
-    // active와 over가 동일하면 무시
-    if (String(active.id) === overId) {
-      clearFolderHover();
-      return;
-    }
-
-    // 이미 같은 타겟으로 타이머 진행 중이면 재시작 안 함 (타이머 안정성)
-    if (folderHoverTargetRef.current === overId) return;
-
-    // 새 타겟 — 이전 타이머 정리 후 새 타이머 시작
-    clearFolderHover();
-    folderHoverTargetRef.current = overId;
-    setHoverTargetId(overPos.item.id);
-
-    folderHoverTimerRef.current = setTimeout(() => {
-      // 타이머 완료 마킹 — ref는 유지(의도 완료 상태), 타이머 ref만 null
-      // 실제 폴더 생성은 handleDragEnd에서 DROP 시에만 수행
-      folderHoverTimerRef.current = null;
-      // folderHoverTargetRef.current 유지 — handleDragEnd에서 completedHoverTarget 판별에 사용
-      // hoverTargetId 시각 피드백 유지 — "여기 드롭하면 폴더 생성" 표시
-    }, 500);
   };
 
   const handleDragStart = (event) => {
@@ -383,37 +385,128 @@ export default function Desktop() {
     }
   };
 
-  // onDragMove: 폴더 모달 앱 드래그 중 포인터가 모달 영역 바깥으로 나가면 모달 닫기
+  // onDragMove: 두 경로로 분기
   const handleDragMove = (event) => {
-    // draggingFromFolderApp 상태이고 모달이 아직 열려있는 경우에만 처리
-    const currentOpenedFolderId = useDesktopStore.getState().openedFolderId;
+    // ── 경로 A: 폴더 모달 앱 꺼내기 ── (기존 로직 변경 없음)
     const currentDraggingFromFolderApp = useDesktopStore.getState().draggingFromFolderApp;
-    if (!currentDraggingFromFolderApp || !currentOpenedFolderId) return;
+    const currentOpenedFolderId = useDesktopStore.getState().openedFolderId;
+    if (currentDraggingFromFolderApp && currentOpenedFolderId) {
+      const { activatorEvent, delta } = event;
+      const pointerX = activatorEvent.clientX + delta.x;
+      const pointerY = activatorEvent.clientY + delta.y;
 
-    // activatorEvent(최초 포인터 위치) + delta(이동량)으로 현재 포인터 좌표 계산
-    const { activatorEvent, delta } = event;
-    const pointerX = activatorEvent.clientX + delta.x;
-    const pointerY = activatorEvent.clientY + delta.y;
+      const modalEl = document.querySelector("[data-folder-modal]");
+      if (!modalEl) return;
 
-    // data-folder-modal 속성으로 모달 요소 찾기
-    const modalEl = document.querySelector("[data-folder-modal]");
-    if (!modalEl) return;
+      const rect = modalEl.getBoundingClientRect();
+      if (
+        pointerX < rect.left ||
+        pointerX > rect.right ||
+        pointerY < rect.top ||
+        pointerY > rect.bottom
+      ) {
+        setOpenedFolderId(null);
+      }
+      return; // 경로 A 이후 면적 계산 실행 안 함
+    }
 
-    const rect = modalEl.getBoundingClientRect();
-    // 포인터가 모달 영역 바깥이면 모달 닫기
-    if (
-      pointerX < rect.left ||
-      pointerX > rect.right ||
-      pointerY < rect.top ||
-      pointerY > rect.bottom
-    ) {
-      setOpenedFolderId(null);
+    // ── 경로 B: 일반 드래그 — 면적 기반 폴더 후보 상태 머신 ──
+    const { active, over } = event;
+    if (!active || !over) {
+      // over가 없으면 NEUTRAL 복귀
+      if (dndModeRef.current !== 'NEUTRAL') {
+        dndModeRef.current = 'NEUTRAL';
+        folderCandidateTargetRef.current = null;
+        setFolderCandidateTargetId(null);
+      }
+      return;
+    }
+
+    const overId = String(over.id);
+
+    // 엣지 드롭존 위에서는 NEUTRAL 유지 (폴더 생성 불가)
+    if (overId === "page-left" || overId === "page-right") {
+      if (dndModeRef.current !== 'NEUTRAL') {
+        dndModeRef.current = 'NEUTRAL';
+        folderCandidateTargetRef.current = null;
+        setFolderCandidateTargetId(null);
+      }
+      return;
+    }
+
+    // 자기 자신 위로 드래그 — REORDER
+    if (String(active.id) === overId) {
+      if (dndModeRef.current !== 'REORDER') {
+        dndModeRef.current = 'REORDER';
+        folderCandidateTargetRef.current = null;
+        setFolderCandidateTargetId(null);
+      }
+      return;
+    }
+
+    // 타겟 아이템 조회
+    const currentPages = useDesktopStore.getState().pages;
+    const overPos = findItemPosition(currentPages, overId);
+
+    // 빈 슬롯 위 — REORDER
+    if (!overPos || overPos.item.type === 'empty') {
+      if (dndModeRef.current !== 'REORDER') {
+        dndModeRef.current = 'REORDER';
+        folderCandidateTargetRef.current = null;
+        setFolderCandidateTargetId(null);
+      }
+      return;
+    }
+
+    // 타겟이 앱 또는 폴더 — 면적 계산
+    // dnd-kit이 제공하는 active.rect.current.translated가 드래그 중 현재 위치
+    const dragRect = active.rect?.current?.translated;
+    if (!dragRect) return;
+
+    // 타겟 DOM 요소 조회 (data-id 속성 사용)
+    // data-id 속성이 없으면 over.rect fallback 사용
+    const targetEl = document.querySelector(`[data-id="${overId}"]`);
+    let ratio = 0;
+    if (targetEl) {
+      ratio = calcIntersectionRatio(dragRect, targetEl);
+    } else if (over.rect) {
+      // fallback: over.rect (dnd-kit 제공 타겟 rect)
+      const left   = Math.max(dragRect.left,   over.rect.left);
+      const right  = Math.min(dragRect.right,  over.rect.left + over.rect.width);
+      const top    = Math.max(dragRect.top,    over.rect.top);
+      const bottom = Math.min(dragRect.bottom, over.rect.top + over.rect.height);
+      if (right > left && bottom > top) {
+        const intersectionArea = (right - left) * (bottom - top);
+        const dragArea   = dragRect.width  * dragRect.height;
+        const targetArea = over.rect.width * over.rect.height;
+        const minArea    = Math.min(dragArea, targetArea);
+        ratio = minArea > 0 ? intersectionArea / minArea : 0;
+      }
+    }
+
+    // 상태 머신 전이
+    const nextMode = ratio >= FOLDER_THRESHOLD ? 'FOLDER_CANDIDATE' : 'REORDER';
+
+    if (nextMode === 'FOLDER_CANDIDATE') {
+      // 같은 타겟으로 이미 FOLDER_CANDIDATE면 재설정 불필요
+      if (dndModeRef.current === 'FOLDER_CANDIDATE' && folderCandidateTargetRef.current === overId) return;
+
+      dndModeRef.current = 'FOLDER_CANDIDATE';
+      folderCandidateTargetRef.current = overId;  // ref 갱신
+      setFolderCandidateTargetId(overId);         // 시각 피드백 (FolderIcon의 folderHoverTarget 클래스)
+    } else {
+      // REORDER — 이전에 FOLDER_CANDIDATE였다면 초기화
+      if (dndModeRef.current !== 'REORDER') {
+        dndModeRef.current = 'REORDER';
+        folderCandidateTargetRef.current = null;  // ref 초기화
+        setFolderCandidateTargetId(null);
+      }
     }
   };
 
   // 드래그 취소(Escape 등) 시 상태 정리 — draggingFromFolderApp이 남으면 이후 모든 드래그가 잘못된 경로로 진입
   const handleDragCancel = () => {
-    clearFolderHover();
+    clearFolderCandidate(); // clearFolderHover() 대신 (내부에서 dndModeRef, folderCandidateTargetRef 모두 초기화)
     clearEdgeSlide(); // 취소 시 엣지 슬라이드 타이머 정리
     setActiveId(null);
     setDraggingFromFolderApp(null);
@@ -423,11 +516,14 @@ export default function Desktop() {
     clearEdgeSlide(); // 드래그 종료 시 엣지 슬라이드 타이머 정리
     const { active, over } = event;
 
+    // 폴더 생성 후보 상태를 먼저 저장 (clearFolderCandidate 호출 전)
+    const folderCandidateTarget = folderCandidateTargetRef.current; // ref에서 직접 읽기
+
     // 폴더 모달에서 DnD로 앱 꺼내기 처리
     if (draggingFromFolderApp) {
+      clearFolderCandidate(); // clearFolderHover() 대신
       setDraggingFromFolderApp(null);
       setActiveId(null);
-      clearFolderHover();
 
       if (over) {
         const overId = String(over.id);
@@ -485,14 +581,7 @@ export default function Desktop() {
       return;
     }
 
-    // clearFolderHover 전에 의도 완료 상태 저장
-    // 조건: 타이머 null(500ms 완료됨) + ref에 타겟 있음 = "드롭하면 폴더 생성" 의도 확정
-    const completedHoverTarget =
-      folderHoverTimerRef.current === null && folderHoverTargetRef.current
-        ? folderHoverTargetRef.current
-        : null;
-    // 폴더 hover 타이머 정리 — 단일 지점
-    clearFolderHover();
+    clearFolderCandidate(); // clearFolderHover() 대신
     setActiveId(null);
     if (!over) return;
 
@@ -544,10 +633,10 @@ export default function Desktop() {
       return;
     }
 
-    // B. 앱 → 폴더 위로 드롭 (500ms hover 완료 시에만 폴더에 앱 추가)
+    // B. 앱 → 폴더 위로 드롭 (면적 60% 이상 겹침 시에만 폴더에 앱 추가)
     if (toItem.type === 'folder') {
-      // 500ms 미충족 — 단순 통과 드롭 → 무시 (앱 원위치)
-      if (!completedHoverTarget || completedHoverTarget !== overId) return;
+      // 면적 기반: FOLDER_CANDIDATE 상태이고 같은 타겟이면 폴더에 앱 추가
+      if (!folderCandidateTarget || folderCandidateTarget !== overId) return;
       // active 아이템을 folder.items 맨 뒤에 추가
       nextPages[toPage][toIndex] = {
         ...toItem,
@@ -563,9 +652,9 @@ export default function Desktop() {
     }
 
     // C. 앱 → 앱 위로 드롭
-    // - completedHoverTarget === overId: 500ms hover 완료 후 DROP → 폴더 생성
+    // - folderCandidateTarget === overId: 면적 60% 이상 겹침 후 DROP → 폴더 생성
     // - 그 외: arrayMove 삽입 정렬 또는 페이지 간 교환
-    if (completedHoverTarget && completedHoverTarget === overId) {
+    if (folderCandidateTarget && folderCandidateTarget === overId) {
       // 폴더 생성 — DROP 시에만 실행
       const newFolderId = `folder-${crypto.randomUUID().split("-")[0]}`;
       const newFolder = {

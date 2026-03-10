@@ -38,12 +38,14 @@ export default function AppIcon({ app, openApp }) {
 
   // activeId: smooth reorder transition 조건부 적용용
   const activeId = useDesktopStore((state) => state.activeId);
-  // hoverTargetId: One UI 시각 피드백용 — 폴더 생성 hover 중인 대상 아이콘 강조
-  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
-  const isHoverTarget = hoverTargetId === app.id;
+  // folderCandidateTargetId: 면적 기반 폴더 생성 후보 시각 피드백용 (hoverTargetId에서 교체)
+  const folderCandidateTargetId = useDesktopStore((state) => state.folderCandidateTargetId);
+  const isHoverTarget = folderCandidateTargetId === app.id;
 
   const style = {
-    transform: transform
+    // hoverTargetId가 설정된 동안 transform 동결 — 타겟 앱이 밀려나지 않도록
+    // hoverTargetId=null(일반 드래그)이면 live reorder 그대로 동작
+    transform: (transform && !hoverTargetId)
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
     // useSortable이 반환한 transition을 activeId 조건부로 적용
@@ -58,6 +60,7 @@ export default function AppIcon({ app, openApp }) {
     <div
       ref={setNodeRef}
       data-sortable="true"
+      data-id={app.id}
       {...attributes}
       {...listeners}
       style={style}
@@ -78,12 +81,13 @@ export function FolderIcon({ folder, openFolder }) {
     useSortable({ id: folder.id, animateLayoutChanges });
 
   const activeId = useDesktopStore((state) => state.activeId);
-  // hoverTargetId: 앱→폴더 500ms hover 시각 피드백용
-  const hoverTargetId = useDesktopStore((state) => state.hoverTargetId);
-  const isHoverTarget = hoverTargetId === folder.id;
+  // folderCandidateTargetId: 면적 기반 폴더 생성 후보 시각 피드백용 (hoverTargetId에서 교체)
+  const folderCandidateTargetId = useDesktopStore((state) => state.folderCandidateTargetId);
+  const isHoverTarget = folderCandidateTargetId === folder.id;
 
   const style = {
-    transform: transform
+    // hoverTargetId가 설정된 동안 transform 동결 — AppIcon과 동일 패턴
+    transform: (transform && !hoverTargetId)
       ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
       : undefined,
     transition: activeId ? transition : undefined,
@@ -98,6 +102,7 @@ export function FolderIcon({ folder, openFolder }) {
     <div
       ref={setNodeRef}
       data-sortable="true"
+      data-id={folder.id}
       {...attributes}
       {...listeners}
       style={style}
