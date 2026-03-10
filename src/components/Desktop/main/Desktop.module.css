@@ -36,6 +36,8 @@
   touch-action: none;
   height: 100%;
   box-sizing: border-box;
+  /* SortableContext transform이 컨테이너 밖으로 넘쳐 scrollbar 생성 방지 */
+  overflow: hidden;
 }
 
 .pageIndicator {

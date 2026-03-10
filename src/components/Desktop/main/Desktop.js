@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import { DndContext, DragOverlay, PointerSensor, rectIntersection, useSensor, useSensors, defaultDropAnimationSideEffects } from "@dnd-kit/core";
-import { SortableContext, arrayMove } from "@dnd-kit/sortable";
+import { SortableContext } from "@dnd-kit/sortable";
 import AppIcon, { EmptySlot, AppIconOverlay, FolderIcon, FolderIconOverlay } from "../../FolderIcon/main/FolderIcon";
 import PageDropZone from "../../PageDropZone/main/PageDropZone";
 import FolderModal from "../../FolderModal/main/FolderModal";
@@ -568,9 +568,10 @@ export default function Desktop() {
         id: `empty-${fromPage}-${fromIndex}-${Date.now()}`,
         type: "empty",
       };
-    } else if (fromPage === toPage) {
-      nextPages[fromPage] = arrayMove(nextPages[fromPage], fromIndex, toIndex);
     } else {
+      // arrayMove → swap: 홈 스크린은 insert-shift가 아닌 swap 시맨틱
+      // arrayMove는 소스~목적지 사이 모든 슬롯(빈 슬롯 포함)을 이동시켜
+      // 105-슬롯 희소 배열에서 반복 드래그 시 앱 위치가 누적으로 흐트러짐
       const temp = nextPages[fromPage][fromIndex];
       nextPages[fromPage][fromIndex] = nextPages[toPage][toIndex];
       nextPages[toPage][toIndex] = temp;
